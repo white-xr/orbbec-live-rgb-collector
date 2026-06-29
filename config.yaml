@@ -1,0 +1,155 @@
+﻿# ============================================================
+# Orbbec RGB-D capture config
+# 用途：普通 RGB-D 采集，保存 color + depth_raw + depth_vis，用于点云转换。
+#
+# 注意：
+# - 如果刚刚运行过 Dual RGB，Gemini 305 会停在 "Dual Color Streams" preset。
+# - 本配置启动时会先切回 "Default" preset，再打开普通 COLOR + DEPTH。
+# ============================================================
+
+output:
+  base_dir: "D:/OrbbecLiveCollector/captures"
+  color_format: "png"
+  depth_raw_format: "png"
+  depth_vis_format: "png"
+  ir_format: "png"
+  save_depth_vis: false
+  png_compression: 0
+  jpg_quality: 95
+  writer_threads: 1
+  write_queue_maxsize: 8192
+
+streams:
+  color: true
+  depth: true
+  color_left: false
+  color_right: false
+  ir_left: false
+  ir_right: false
+  imu: false
+
+device:
+  # RGB-D 模式固定使用 Gemini 335L。
+  # 如果更换 335L 设备，请把这里改成新设备序列号。
+  serial: "CP2N1630005C"
+  index: null
+
+device_preset:
+  enabled: true
+  name: "Default"
+  required: true
+  settle_ms: 800
+
+color:
+  width: 1280
+  height: 800
+  fps: 30
+  format: "BGR"
+  auto_exposure: true
+  exposure: 156
+  gain: 16
+  auto_white_balance: true
+  white_balance: 4500
+
+depth:
+  width: 1280
+  height: 800
+  fps: 30
+  format: "Y16"
+  min_depth_mm: 20
+  max_depth_mm: 10000
+  colormap: "JET"
+  auto_exposure: true
+  exposure: 3000
+  gain: 16
+
+ir:
+  width: 848
+  height: 480
+  fps: 30
+  format: "Y16"
+  auto_exposure: true
+  exposure: 3000
+  gain: 16
+
+preview:
+  enabled: true
+  window_width: 1400
+  window_height: 800
+  panel_width: 700
+  panel_height: 400
+  preview_every_n_frames: 30
+  depth_vis_every_n_frames: 30
+
+pointcloud:
+  enabled: true
+  require_aligned_depth_to_color: false
+  depth_unit: "mm"
+  preferred_alignment: "none"
+
+pipeline:
+  frame_timeout_ms: 200
+  frame_aggregate_mode: "FULL_FRAME_REQUIRE"
+  align_mode: "DISABLE"
+  fallback_to_sdk_default: false
+
+# ============================================================
+# Camera intrinsics reference
+# 说明：
+# 1. 这里是给人查看/汇报用的固定参考值，不会覆盖 SDK 实时读取的内参。
+# 2. 内参和分辨率、preset、是否裁剪/缩放强绑定；切换分辨率后不能直接混用。
+# 3. 正式点云/标定优先使用每次采集目录里的 camera_info.yaml / camera_params.json。
+# ============================================================
+intrinsics_reference:
+  gemini_305:
+    device_name: "Orbbec Gemini 305"
+    serial_number: "CV2L36000024"
+    source_file: "D:/OrbbecLiveCollector/captures/scan_data_2026-06-11_16-23-37/eye_in_hand/camera_info.yaml"
+    mode: "RGB-D 1280x800"
+    color:
+      width: 1280
+      height: 800
+      fx: 613.50158691
+      fy: 613.32043457
+      cx: 631.95904541
+      cy: 398.14706421
+      distortion: [-1.26500678, 0.86472613, -0.00009481, -0.00013474, -0.20974441]
+    depth:
+      width: 1280
+      height: 800
+      fx: 624.57928467
+      fy: 624.57928467
+      cx: 636.50000000
+      cy: 398.00000000
+      distortion: [0.0, 0.0, 0.0, 0.0, 0.0]
+
+  gemini_335l:
+    device_name: "Orbbec Gemini 335L"
+    serial_number: "CP2N1630005C"
+    source_file: "legacy_dataset_335L_eye_in_hand_camera_info.yaml"
+    mode: "legacy reference only, not current 1280x800 RGB-D intrinsics"
+    current_stream_note: "Actual capture stream is configured above as color 1280x800@30 + depth 1280x800@30. Do not use this legacy reference as current 1280x800 calibration."
+    color:
+      width: 1280
+      height: 800
+      fx: 609.86303711
+      fy: 609.93835449
+      cx: 641.70275879
+      cy: 365.58212280
+      distortion: [-0.03094024, 0.03461796, -0.00027218, -0.00023485, -0.01208368]
+    depth:
+      width: 848
+      height: 480
+      fx: 409.64669800
+      fy: 409.64669800
+      cx: 422.01251221
+      cy: 244.96875000
+      distortion: [0.0, 0.0, 0.0, 0.0, 0.0]
+
+
+
+
+
+
+
+

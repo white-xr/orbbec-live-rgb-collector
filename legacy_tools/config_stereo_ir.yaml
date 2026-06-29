@@ -1,0 +1,61 @@
+# ============================================================
+# Orbbec 左右目 IR 采集配置
+# 用途：给 Fast-FoundationStereo 或后续双目流程保存 left/right 图像。
+#
+# 重要说明：
+# 1. Gemini 305 当前 SDK 暴露的是 IR_LEFT / IR_RIGHT 左右目灰度流，
+#    不是 COLOR_LEFT / COLOR_RIGHT 双路彩色流。
+# 2. 保存目录固定为：
+#      ir_left/  <- SDK OB_FRAME_IR_LEFT
+#      ir_right/ <- SDK OB_FRAME_IR_RIGHT
+#    脚本也会在 camera_info.json 里写明这个映射，避免左右反。
+# 3. Fast-FoundationStereo 通常要求已去畸变、极线校正后的左右图。
+#    本脚本会尝试打开 SDK 的 IR rectify 属性，但无法自动证明输出一定
+#    已完成极线校正，所以默认在 camera_info.json 中标记 rectified=false。
+#    只有你确认 SDK 输出已校正，才把 rectification.assume_rectified 改为 true。
+# ============================================================
+
+output:
+  base_dir: "D:/OrbbecLiveCollector/captures"
+  ir_format: "png"
+  jpg_quality: 95
+
+streams:
+  color: false
+  color_left: false
+  color_right: false
+  depth: false
+  ir_left: true
+  ir_right: true
+  imu: false
+
+ir:
+  width: 1280
+  height: 800
+  fps: 30
+  formats: ["Y16", "Y8", "GRAY"]
+  auto_exposure: true
+  exposure: 3000
+  gain: 16
+  rectify: true              # 尝试请求 SDK 输出校正后的 IR；是否真正校正会在 camera_info.json 里标记为未验证
+
+rectification:
+  try_sdk_rectify: true       # 和 ir.rectify 保持一致，写入元数据
+  assume_rectified: false     # 保守默认：未人工确认前，camera_info.json 写 rectified=false
+
+preview:
+  enabled: true
+  window_width: 1400
+  window_height: 800
+
+pipeline:
+  frame_timeout_ms: 200
+  frame_aggregate_mode: "FULL_FRAME_REQUIRE"
+  align_mode: "DISABLE"
+  fallback_to_sdk_default: true
+
+pointcloud:
+  enabled: false
+  require_aligned_depth_to_color: false
+  depth_unit: "mm"
+  preferred_alignment: "none"

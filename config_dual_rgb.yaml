@@ -1,0 +1,127 @@
+﻿# ============================================================
+# Orbbec Gemini 305 Dual RGB 采集配置
+# 用途：切换到 "Dual Color Streams" preset 后，保存左右双彩色图。
+#
+# 输出结构：
+#   left_rgb/      <- SDK OB_FRAME_COLOR_LEFT
+#   right_rgb/     <- SDK OB_FRAME_COLOR_RIGHT
+#   K.txt          <- 第 1 行 3x3 左相机内参矩阵展开，第 2 行 baseline(m)
+#   timestamps.csv <- 用于精确统计真实保存帧率
+#
+# 注意：
+# 1. 不使用 IR_LEFT / IR_RIGHT。
+# 2. 启动 pipeline 前必须先切换 device preset。
+# 3. Fast-FoundationStereo 通常要求已去畸变/极线校正后的左右图。
+#    当前 SDK 原始输出无法在脚本内自动证明已极线校正，所以
+#    camera_info.json 默认写 rectified=false。
+# ============================================================
+
+output:
+  base_dir: "D:/OrbbecLiveCollector/captures"
+  color_format: "png"
+  # PNG 压缩等级。0 表示最快保存，文件会更大，但更容易稳定 30fps。
+  png_compression: 0
+  jpg_quality: 95
+  writer_threads: 1
+  write_queue_maxsize: 8192
+  minimal_dual_rgb_layout: true
+
+streams:
+  color: false
+  color_left: true
+  color_right: true
+  depth: false
+  ir_left: false
+  ir_right: false
+  imu: false
+
+device:
+  # Dual RGB 模式固定使用 Gemini 305。
+  # 如果更换 305 设备，请把这里改成新设备序列号。
+  serial: "CV2L36000024"
+  index: null
+
+device_preset:
+  enabled: true
+  name: "Dual Color Streams"
+  required: true
+  settle_ms: 800
+
+dual_color:
+  width: 1280
+  height: 800
+  # 目标是稳定保存 30fps 双 RGB；不要请求 60fps，否则写盘压力更大，容易掉帧。
+  fps: 30
+  formats: ["BGR", "RGB", "YUYV", "MJPG", "BGRA", "RGBA", "UYVY"]
+  auto_exposure: true
+  exposure: 156
+  gain: 16
+  auto_white_balance: true
+  white_balance: 4500
+
+rectification:
+  try_sdk_rectify: false 
+
+preview:
+  enabled: true
+  window_width: 1400
+  window_height: 800
+  # 保留预览，但降低刷新频率，尽量不影响双 RGB 保存帧率。
+  preview_every_n_frames: 15
+
+pipeline:
+  frame_timeout_ms: 200
+  frame_aggregate_mode: "FULL_FRAME_REQUIRE"
+  align_mode: "DISABLE"
+  fallback_to_sdk_default: false
+
+pointcloud:
+  enabled: false
+  require_aligned_depth_to_color: false
+  depth_unit: "mm"
+  preferred_alignment: "none"
+
+stereo:
+  baseline_m: 0.018
+  left_right_order_verified_by_user: true
+  write_identity_poses_csv: false
+  identity_pose_assumes_static_scene: false
+
+fusion:
+  enabled: false
+
+pose_source:
+  mode: "none"
+
+intrinsics_reference:
+  gemini_305_dual_rgb:
+    device_name: "Orbbec Gemini 305"
+    serial_number: "CV2L36000024"
+    mode: "Dual RGB 1280x800"
+    calibration_quality: "reference_only"
+    rectified: false
+    baseline_m: 0.018
+    left:
+      width: 1280
+      height: 800
+      fx: 613.50158691
+      fy: 613.32043457
+      cx: 631.95904541
+      cy: 398.14706421
+      distortion: [-1.26500678, 0.86472613, -0.00009481, -0.00013474, -0.20974441]
+    right:
+      width: 1280
+      height: 800
+      fx: 613.50158691
+      fy: 613.32043457
+      cx: 631.95904541
+      cy: 398.14706421
+      distortion: [-1.26500678, 0.86472613, -0.00009481, -0.00013474, -0.20974441]
+    left_to_right:
+      rotation_3x3:
+        - [1.0, 0.0, 0.0]
+        - [0.0, 1.0, 0.0]
+        - [0.0, 0.0, 1.0]
+      translation_m: [0.018, 0.0, 0.0]
+
+

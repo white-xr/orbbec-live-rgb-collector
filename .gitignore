@@ -1,0 +1,25 @@
+# Python cache and local runtime files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local virtual environments
+.venv/
+venv/
+env/
+
+# Local collector settings
+orbbec_rgb_dataset_gui_settings.json
+
+# Captured datasets and generated camera metadata
+captures/
+
+# Temporary/editor files
+.DS_Store
+Thumbs.db
+*.tmp
+*.log
+
+# Local Codex/agent metadata
+.agents/
+.codex/
