@@ -45,6 +45,16 @@ def list_pngs(folder: Path) -> list[Path]:
     return sorted([p for p in folder.glob('*.png') if p.is_file()], key=lambda p: p.name)
 
 
+def imread_unicode(path: Path, flags: int) -> np.ndarray | None:
+    try:
+        data = np.fromfile(str(path), dtype=np.uint8)
+    except OSError:
+        return None
+    if data.size == 0:
+        return None
+    return cv2.imdecode(data, flags)
+
+
 def first_existing_dir(session_dir: Path, names: tuple[str, ...]) -> Path:
     for name in names:
         candidate = session_dir / name
@@ -179,8 +189,8 @@ def main() -> int:
     depth_type_errors = 0
 
     for idx in sampled:
-        rgb = cv2.imread(str(rgb_files[idx]), cv2.IMREAD_UNCHANGED)
-        depth = cv2.imread(str(depth_files[idx]), cv2.IMREAD_UNCHANGED)
+        rgb = imread_unicode(rgb_files[idx], cv2.IMREAD_UNCHANGED)
+        depth = imread_unicode(depth_files[idx], cv2.IMREAD_UNCHANGED)
 
         if rgb is None:
             findings.append({'level': 'FAIL', 'message': f'failed to read {rgb_dir.name}/{rgb_files[idx].name}'})
