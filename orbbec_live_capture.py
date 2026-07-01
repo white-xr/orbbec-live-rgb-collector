@@ -514,9 +514,23 @@ def validate_capture_settings(settings: dict[str, Any]) -> None:
         and streams_cfg.get('color_right', False)
         and not streams_cfg.get('depth', False)
     )
+    preset_cfg = settings.get('device_preset', {}) or {}
+    target_preset = str(preset_cfg.get('name') or '').strip()
     fusion_enabled = bool(fusion_cfg.get('enabled', False))
     pose_mode = str(pose_source_cfg.get('mode', 'none') or 'none').strip().lower()
     writes_identity = bool(stereo_cfg.get('write_identity_poses_csv', False))
+
+    if target_preset == DUAL_COLOR_PRESET_NAME and not dual_rgb_mode:
+        raise RuntimeError(
+            f'{DUAL_COLOR_PRESET_NAME} exposes COLOR_LEFT/COLOR_RIGHT only, '
+            'so it cannot be used for RGB-D or normal COLOR capture. '
+            'Use Default/High Accuracy for RGB-D, or switch to the 305 dual RGB collector.'
+        )
+    if dual_rgb_mode and target_preset and target_preset != DUAL_COLOR_PRESET_NAME:
+        raise RuntimeError(
+            f'Dual RGB capture requires the "{DUAL_COLOR_PRESET_NAME}" device preset, '
+            f'but got "{target_preset}".'
+        )
 
     if dual_rgb_mode and fusion_enabled and pose_mode in ('', 'none') and not writes_identity:
         raise RuntimeError(

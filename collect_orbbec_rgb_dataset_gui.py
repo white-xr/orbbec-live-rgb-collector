@@ -101,6 +101,7 @@ MODE_FIELDS = {
 
 CAMERA_TASKS = {"335L": "coarse", "305": "precise"}
 KNOWN_CAMERA_SERIALS = {"CV2L36000024", "CP28563000N0", "CP2N1630005C"}
+DUAL_COLOR_PRESET = "Dual Color Streams"
 STANDARD_CONFIGS = {
     str(ROOT / "config.yaml"),
     str(ROOT / "config_305_rgbd.yaml"),
@@ -114,7 +115,7 @@ PRESET_FALLBACKS = {
         "Close Range High Accuracy",
         "Close Range Default",
         "Factory Calib",
-        "Dual Color Streams",
+        DUAL_COLOR_PRESET,
         "Custom",
     ],
     "335L": [
@@ -138,7 +139,7 @@ MODE_DEFAULT_PRESETS = {
     "rgb_interval_305": "Default",
     "rgbd_305": "Default",
     "rgbd_335l": "Default",
-    "dual_rgb_305": "Dual Color Streams",
+    "dual_rgb_305": DUAL_COLOR_PRESET,
 }
 
 DEFAULTS = {
@@ -485,7 +486,18 @@ class LauncherApp:
             return str(self.vars["camera"].get()).strip() or "335L"
         return MODE_CAMERA_HINTS.get(mode, "")
 
+    def is_preset_allowed_for_mode(self, mode: str, preset_name: str) -> bool:
+        preset = str(preset_name or "").strip()
+        if not preset:
+            return False
+        if mode == "dual_rgb_305":
+            return preset == DUAL_COLOR_PRESET
+        if mode in {"rgb_dataset", "rgb_interval_305", "rgbd_305"}:
+            return preset != DUAL_COLOR_PRESET
+        return True
+
     def preset_values_for_current_mode(self) -> list[str]:
+        mode = self.current_mode()
         camera_hint = self.camera_hint_for_current_mode()
         if not camera_hint:
             return []
@@ -503,9 +515,13 @@ class LauncherApp:
                 detected_values.extend([str(item).strip() for item in preset_names])
 
         values = self.ordered_unique(detected_values)
+        if not values:
+            values = list(PRESET_FALLBACKS.get(camera_hint, ["Default"]))
+        values = [value for value in values if self.is_preset_allowed_for_mode(mode, value)]
         if values:
             return values
-        return list(PRESET_FALLBACKS.get(camera_hint, ["Default"]))
+        default = MODE_DEFAULT_PRESETS.get(mode, "Default")
+        return [default] if default else []
 
     def update_preset_choices(self, force_default: bool = False) -> None:
         values = self.preset_values_for_current_mode()
@@ -749,6 +765,14 @@ class LauncherApp:
                 return False
         if "config_path" in MODE_FIELDS[mode] and not Path(str(self.vars["config_path"].get()).strip()).exists():
             messagebox.showerror("参数错误", f"配置文件不存在: {self.vars['config_path'].get()}")
+            return False
+        preset = str(self.vars["device_preset"].get()).strip()
+        if "device_preset" in MODE_FIELDS[mode] and not self.is_preset_allowed_for_mode(mode, preset):
+            messagebox.showerror(
+                "设备模式不匹配",
+                f"{MODE_LABELS[mode]} 不能使用 {preset}。\n"
+                "RGB-D/普通 RGB 请用 Default、High Accuracy 等普通模式；305 双 RGB 才使用 Dual Color Streams。",
+            )
             return False
         return True
 

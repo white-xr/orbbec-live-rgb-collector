@@ -96,6 +96,12 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--width, --height and --fps must be positive.")
     if float(args.auto_interval) <= 0:
         raise ValueError("--auto-interval must be > 0.")
+    if str(args.preset or "").strip() == cap.DUAL_COLOR_PRESET_NAME:
+        raise ValueError(
+            "Dual Color Streams exposes COLOR_LEFT/COLOR_RIGHT only. "
+            "Use Default/High Accuracy for YOLO RGB dataset collection, "
+            "or switch to the 305 dual RGB collector."
+        )
 
 
 def sanitize_token(value: str, fallback: str) -> str:

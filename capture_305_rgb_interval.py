@@ -141,6 +141,8 @@ def main() -> int:
     parser.add_argument("--max-saves", type=int, default=0, help="最多保存多少张，0 表示不限")
     parser.add_argument("--no-preview", action="store_true", help="不显示预览窗口")
     args = parser.parse_args()
+    if str(args.preset or "").strip() == cap.DUAL_COLOR_PRESET_NAME:
+        parser.error("Dual Color Streams 只用于 305 双 RGB；305 单 RGB 间隔采集请用 Default/High Accuracy 等普通模式。")
 
     output_root = Path(args.output_root).expanduser().resolve()
     session_dir = make_session_dir(output_root)
