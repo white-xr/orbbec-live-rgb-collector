@@ -31,7 +31,7 @@ streams:
 device:
   # RGB-D 模式固定使用 Gemini 335L。
   # 如果更换 335L 设备，请把这里改成新设备序列号。
-  serial: "CP2N1630005C"
+  serial: "CP28563000N0"
   index: null
 
 device_preset:
@@ -145,7 +145,6 @@ intrinsics_reference:
       cx: 422.01251221
       cy: 244.96875000
       distortion: [0.0, 0.0, 0.0, 0.0, 0.0]
-
 
 
 

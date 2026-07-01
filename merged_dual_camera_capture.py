@@ -4,7 +4,7 @@
 Single-window dual Orbbec capture.
 
 One process opens:
-- Gemini 335L: RGB-D, config.yaml, SN CP2N1630005C
+- Gemini 335L: RGB-D, config.yaml, SN CP28563000N0
 - Gemini 305 : Dual RGB, config_dual_rgb.yaml, SN CV2L36000024
 
 Keys:
@@ -29,7 +29,7 @@ import orbbec_live_capture as cap
 ROOT = Path(__file__).resolve().parent
 CONFIG_335L_RGBD = ROOT / "config.yaml"
 CONFIG_305_DUAL_RGB = ROOT / "config_dual_rgb.yaml"
-SN_335L = "CP2N1630005C"
+SN_335L = "CP28563000N0"
 SN_305 = "CV2L36000024"
 WINDOW_NAME = "Orbbec 335L RGB-D + 305 Dual RGB"
 CONTROL_BUTTON_RECT = (24, 724, 220, 790)

@@ -3,7 +3,7 @@
 """
 One-command controller for two Orbbec cameras.
 
-335L: RGB-D, config.yaml, SN CP2N1630005C
+335L: RGB-D, config.yaml, SN CP28563000N0
 305 : Dual RGB, config_dual_rgb.yaml, SN CV2L36000024
 
 This is software-level synchronized start/stop. It is not hardware trigger
@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parent
 CAPTURE_SCRIPT = ROOT / "orbbec_live_capture.py"
 CONFIG_RGBD_335L = ROOT / "config.yaml"
 CONFIG_DUAL_RGB_305 = ROOT / "config_dual_rgb.yaml"
-SN_335L = "CP2N1630005C"
+SN_335L = "CP28563000N0"
 SN_305 = "CV2L36000024"
 
 

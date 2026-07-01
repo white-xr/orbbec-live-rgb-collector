@@ -35,21 +35,21 @@ SCRIPTS = {
 }
 
 MODE_LABELS = {
-    "rgb_dataset": "YOLO RGB 数据集采集",
+    "rgb_dataset": "YOLO RGB 数据集采集（335L/305）",
     "rgb_interval_305": "305 单 RGB 间隔采集",
     "rgbd_335l": "335L RGB-D 采集",
     "dual_rgb_305": "305 双 RGB 采集",
-    "merged_dual": "335L + 305 单窗口联合采集",
-    "both_controller": "335L + 305 双进程联合采集",
+    "merged_dual": "335L + 305 联合预览采集",
+    "both_controller": "335L + 305 同步启动采集",
 }
 
 MODE_DESCRIPTIONS = {
-    "rgb_dataset": "只保存 RGB 图片和 metadata.csv，适合检测/分割数据集采集。",
+    "rgb_dataset": "只保存 RGB 图片和 metadata.csv，可选 335L/coarse 或 305/precise。",
     "rgb_interval_305": "旧版 305 单路 RGB 单张/间隔保存工具。",
     "rgbd_335l": "使用 config.yaml 启动普通 RGB-D 采集，保存 color/depth 等配置内启用的数据。",
     "dual_rgb_305": "使用 config_dual_rgb.yaml 切到 Dual Color Streams，保存 305 左右双 RGB。",
-    "merged_dual": "一个窗口同时打开 335L RGB-D 和 305 双 RGB，适合现场联合预览采集。",
-    "both_controller": "启动两个独立采集进程并做软件同步开始/停止，会打开独立控制窗口。",
+    "merged_dual": "单个窗口同时打开 335L RGB-D 和 305 双 RGB，适合现场联合预览。",
+    "both_controller": "启动两个独立采集进程，用控制器统一倒计时开始/停止。",
 }
 
 MODE_FIELDS = {
@@ -106,8 +106,11 @@ MODE_FIELDS = {
     "both_controller": ["tag", "delay"],
 }
 
+SN_335L = "CP28563000N0"
+SN_305 = "CV2L36000024"
+OLD_SN_335L = "CP2N1630005C"
 CAMERA_TASKS = {"335L": "coarse", "305": "precise"}
-LEGACY_CAMERA_SERIALS = {"CP2N1630005C", "CV2L36000024"}
+KNOWN_CAMERA_SERIALS = {SN_335L, SN_305, OLD_SN_335L}
 STANDARD_CONFIGS = {str(ROOT / "config.yaml"), str(ROOT / "config_dual_rgb.yaml"), ""}
 
 DEFAULTS = {
@@ -250,6 +253,11 @@ class LauncherApp:
         self.add_entry_row("png_compression", "PNG 压缩", "0 最快，9 最小")
         self.add_check_row("start_auto", "启动后自动保存")
         self.add_check_row("no_preview", "无预览窗口")
+        self.empty_params_note = ttk.Label(
+            self.param_box,
+            text="该模式无需额外参数，直接启动即可。",
+            foreground="#666666",
+        )
 
         buttons = ttk.Frame(outer)
         buttons.pack(fill="x", pady=(0, 10))
@@ -274,35 +282,39 @@ class LauncherApp:
         for var in self.vars.values():
             var.trace_add("write", lambda *_: self.update_command_preview())
 
-    def add_field_row(self, key: str, label: str, widget, hint: str = "") -> None:
+    def add_field_row(self, key: str, label: str, hint: str = "") -> ttk.Frame:
         row = ttk.Frame(self.param_box)
-        row.columnconfigure(1, weight=1)
+        row.columnconfigure(1, weight=1, minsize=320)
         ttk.Label(row, text=label, width=18).grid(row=0, column=0, sticky="w", padx=(0, 8), pady=4)
-        widget.grid(row=0, column=1, sticky="ew", pady=4)
         if hint:
-            ttk.Label(row, text=hint, foreground="#666666").grid(row=0, column=2, sticky="w", padx=(8, 0), pady=4)
+            ttk.Label(row, text=hint, foreground="#666666", wraplength=360).grid(
+                row=0, column=2, sticky="w", padx=(8, 0), pady=4
+            )
         self.field_rows[key] = row
+        return row
 
     def add_entry_row(self, key: str, label: str, hint: str = "") -> None:
-        entry = ttk.Entry(self.param_box, textvariable=self.vars[key])
-        self.add_field_row(key, label, entry, hint)
+        row = self.add_field_row(key, label, hint)
+        ttk.Entry(row, textvariable=self.vars[key]).grid(row=0, column=1, sticky="ew", pady=4)
 
     def add_combo_row(self, key: str, label: str, values: list[str], command=None, hint: str = "") -> None:
-        combo = ttk.Combobox(self.param_box, textvariable=self.vars[key], values=values, state="readonly")
+        row = self.add_field_row(key, label, hint)
+        combo = ttk.Combobox(row, textvariable=self.vars[key], values=values, state="readonly")
         if command is not None:
             combo.bind("<<ComboboxSelected>>", lambda _event: command())
-        self.add_field_row(key, label, combo, hint)
+        combo.grid(row=0, column=1, sticky="ew", pady=4)
 
     def add_check_row(self, key: str, label: str) -> None:
-        check = ttk.Checkbutton(self.param_box, text=label, variable=self.vars[key])
-        self.add_field_row(key, "", check)
+        row = self.add_field_row(key, "")
+        ttk.Checkbutton(row, text=label, variable=self.vars[key]).grid(row=0, column=1, sticky="w", pady=4)
 
     def add_path_row(self, key: str, label: str, browse_dir: bool) -> None:
-        frame = ttk.Frame(self.param_box)
+        row = self.add_field_row(key, label)
+        frame = ttk.Frame(row)
         frame.columnconfigure(0, weight=1)
         ttk.Entry(frame, textvariable=self.vars[key]).grid(row=0, column=0, sticky="ew")
         ttk.Button(frame, text="浏览", command=lambda: self.browse_path(key, browse_dir)).grid(row=0, column=1, padx=(8, 0))
-        self.add_field_row(key, label, frame)
+        frame.grid(row=0, column=1, sticky="ew", pady=4)
 
     def browse_path(self, key: str, browse_dir: bool) -> None:
         initial = str(self.vars[key].get()).strip()
@@ -330,32 +342,41 @@ class LauncherApp:
             self.on_camera_changed()
             self.vars["output_root"].set(str(ROOT / "captures" / "rgb_dataset"))
         elif mode == "rgb_interval_305":
-            self.vars["serial"].set("CV2L36000024" if self.vars["serial"].get() in ("", "CP2N1630005C") else self.vars["serial"].get())
+            self.apply_mode_serial(SN_305)
             self.vars["output_root"].set(str(ROOT / "captures"))
         elif mode == "rgbd_335l":
+            self.apply_mode_serial(SN_335L)
             if self.vars["config_path"].get() in STANDARD_CONFIGS:
                 self.vars["config_path"].set(str(ROOT / "config.yaml"))
             self.vars["output_root"].set(str(ROOT / "captures"))
         elif mode == "dual_rgb_305":
+            self.apply_mode_serial(SN_305)
             if self.vars["config_path"].get() in STANDARD_CONFIGS:
                 self.vars["config_path"].set(str(ROOT / "config_dual_rgb.yaml"))
             self.vars["output_root"].set(str(ROOT / "captures"))
 
-        visible = set(MODE_FIELDS[mode])
-        row_index = 0
-        for key, row in self.field_rows.items():
-            if key in visible:
-                row.grid(row=row_index, column=0, sticky="ew")
-                row_index += 1
-            else:
-                row.grid_remove()
+        for row in self.field_rows.values():
+            row.grid_remove()
+        self.empty_params_note.grid_remove()
+
+        visible = MODE_FIELDS[mode]
+        if not visible:
+            self.empty_params_note.grid(row=0, column=0, sticky="w", pady=8)
+        else:
+            for row_index, key in enumerate(visible):
+                self.field_rows[key].grid(row=row_index, column=0, sticky="ew")
         self.update_command_preview()
 
     def on_camera_changed(self) -> None:
         camera = str(self.vars["camera"].get())
         self.vars["task"].set(CAMERA_TASKS.get(camera, "precise"))
-        if str(self.vars["serial"].get()).strip() in LEGACY_CAMERA_SERIALS:
+        if str(self.vars["serial"].get()).strip() in KNOWN_CAMERA_SERIALS:
             self.vars["serial"].set("")
+
+    def apply_mode_serial(self, serial: str) -> None:
+        current = str(self.vars["serial"].get()).strip()
+        if current in ("", *KNOWN_CAMERA_SERIALS):
+            self.vars["serial"].set(serial)
 
     def reset_time_token(self) -> None:
         token = datetime.now().strftime("%Y%m%d_%H%M%S")

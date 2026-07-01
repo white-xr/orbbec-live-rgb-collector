@@ -7,5 +7,5 @@ if exist "%CONDA_ACTIVATE%" (
 ) else (
     call conda activate rgbdseg
 )
-python "%~dp0orbbec_live_capture.py" --config "%~dp0config.yaml" --serial CP2N1630005C
+python "%~dp0orbbec_live_capture.py" --config "%~dp0config.yaml" --serial CP28563000N0
 pause
