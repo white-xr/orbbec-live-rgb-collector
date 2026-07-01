@@ -1439,6 +1439,14 @@ def draw_status_sections(img: np.ndarray, sections: list[tuple[str, list[str]]])
     line_h = 18
     inner_pad = 10
     rects: list[tuple[int, int, int, int, str, list[str]]] = []
+    card_heights = [
+        inner_pad * 2 + title_h + max(1, len(lines)) * line_h
+        for _title, lines in sections[:4]
+    ]
+    row_heights: list[int] = []
+    for row in range(2):
+        start = row * 2
+        row_heights.append(max(card_heights[start:start + 2] or [0]))
 
     for idx, (title, lines) in enumerate(sections[:4]):
         col = idx % 2
@@ -1446,7 +1454,7 @@ def draw_status_sections(img: np.ndarray, sections: list[tuple[str, list[str]]])
         x1 = margin + col * (card_w + gap)
         x2 = x1 + card_w
         card_h = inner_pad * 2 + title_h + max(1, len(lines)) * line_h
-        y1 = margin + row * (card_h + gap)
+        y1 = margin + sum(row_heights[:row]) + row * gap
         y2 = y1 + card_h
         cv2.rectangle(overlay, (x1, y1), (x2, y2), (18, 18, 18), thickness=-1)
         cv2.rectangle(overlay, (x1, y1), (x2, y2), (90, 90, 90), thickness=1)
@@ -3727,9 +3735,9 @@ def main() -> int:
                 preview = make_preview(last_color, last_depth_vis, last_ir_left_vis, last_ir_right_vis, last_color_left, last_color_right)
                 dual_rgb_on = bool(save_color_left and save_color_right and not save_depth)
                 rgbd_on = bool(save_color and save_depth)
-                pair_count = writer.pair_index if writer and writer.active else 0
+                saved_count = writer.pair_index if writer else 0
                 skip_text = '--'
-                if writer and writer.active:
+                if writer:
                     skip_text = (
                         f'M{writer.skipped_missing} F{writer.skipped_format} '
                         f'R{writer.skipped_resolution} D{writer.skipped_decode} S{writer.skipped_sync}'
@@ -3752,7 +3760,7 @@ def main() -> int:
                             f'RGB_L: {frame_res_text(color_left_fd) if dual_rgb_on else "--"}',
                             f'RGB_R: {frame_res_text(color_right_fd) if dual_rgb_on else "--"}',
                             f'FPS: {fps:.1f}' if dual_rgb_on else 'FPS: --',
-                            f'Pair count: {pair_count}' if dual_rgb_on else 'Pair count: --',
+                            f'Saved pairs: {saved_count}' if dual_rgb_on else 'Saved pairs: --',
                             f'Skips: {skip_text}' if dual_rgb_on else 'Skips: --',
                         ],
                     ),
@@ -3762,6 +3770,8 @@ def main() -> int:
                             f'Status: {"ON" if rgbd_on else "OFF"}',
                             f'Color: {frame_res_text(color_fd) if rgbd_on else "--"}',
                             f'Depth: {frame_res_text(depth_fd) if rgbd_on else "--"}',
+                            f'FPS: {fps:.1f}' if rgbd_on else 'FPS: --',
+                            f'Saved pairs: {saved_count}' if rgbd_on else 'Saved pairs: --',
                             f'Align: {align_mode_name if rgbd_on else "--"}',
                             f'Depth scale: {depth_scale_text}',
                         ],
@@ -3770,7 +3780,8 @@ def main() -> int:
                         'Capture',
                         [
                             f'Status: {"RUNNING" if capturing else "IDLE"}',
-                            f'Preview: 1/{preview_every_n} frames',
+                            f'Frame count: {preview_frame_index}',
+                            f'Preview: every {preview_every_n} frame(s)',
                             f'Session: {session_name}',
                         ],
                     ),
