@@ -1,0 +1,87 @@
+# ============================================================
+# Orbbec Gemini 305 RGB-D capture config
+# 用途：Gemini 305 普通 RGB-D 采集，保存 color + depth_raw。
+#
+# 操作：
+# - 启动后只预览，不会立刻保存。
+# - 预览窗口内按 SPACE/S 开始保存，按 SPACE/E 停止保存，Q/ESC 退出。
+# ============================================================
+
+output:
+  base_dir: "D:/OrbbecLiveCollector/captures"
+  color_format: "png"
+  depth_raw_format: "png"
+  depth_vis_format: "png"
+  ir_format: "png"
+  save_depth_vis: false
+  png_compression: 0
+  jpg_quality: 95
+  writer_threads: 1
+  write_queue_maxsize: 8192
+
+streams:
+  color: true
+  depth: true
+  color_left: false
+  color_right: false
+  ir_left: false
+  ir_right: false
+  imu: false
+
+device:
+  # 默认不锁定序列号，按型号名自动选择第一台 Gemini 305。
+  # 如果现场有多台 305 且需要指定某一台，可临时填写 serial 或 index。
+  model_hint: "305"
+  serial: ""
+  index: null
+
+device_preset:
+  enabled: true
+  name: "Default"
+  required: true
+  settle_ms: 800
+
+color:
+  width: 1280
+  height: 800
+  fps: 30
+  format: "BGR"
+  auto_exposure: true
+  exposure: 156
+  gain: 16
+  auto_white_balance: true
+  white_balance: 4500
+
+depth:
+  width: 1280
+  height: 800
+  fps: 30
+  format: "Y16"
+  min_depth_mm: 20
+  max_depth_mm: 10000
+  colormap: "JET"
+  auto_exposure: true
+  exposure: 3000
+  gain: 16
+
+preview:
+  enabled: true
+  window_width: 1400
+  window_height: 800
+  panel_width: 700
+  panel_height: 400
+  preview_every_n_frames: 1
+  depth_vis_every_n_frames: 3
+
+pipeline:
+  frame_timeout_ms: 200
+  frame_aggregate_mode: "FULL_FRAME_REQUIRE"
+  align_mode: "DISABLE"
+  fallback_to_sdk_default: false
+
+pointcloud:
+  enabled: false
+  require_aligned_depth_to_color: false
+
+pose_source:
+  mode: "none"

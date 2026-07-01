@@ -29,6 +29,7 @@ SETTINGS_FILE = ROOT / "orbbec_rgb_dataset_gui_settings.json"
 SCRIPTS = {
     "rgb_dataset": ROOT / "collect_orbbec_rgb_dataset.py",
     "rgb_interval_305": ROOT / "capture_305_rgb_interval.py",
+    "rgbd_305": ROOT / "capture_305_rgbd.py",
     "rgbd_config": ROOT / "orbbec_live_capture.py",
     "merged_dual": ROOT / "merged_dual_camera_capture.py",
 }
@@ -36,6 +37,7 @@ SCRIPTS = {
 MODE_LABELS = {
     "rgb_dataset": "YOLO RGB 数据集采集（335L/305）",
     "rgb_interval_305": "305 单 RGB 间隔采集",
+    "rgbd_305": "305 RGB-D 采集",
     "rgbd_335l": "335L RGB-D 采集",
     "dual_rgb_305": "305 双 RGB 采集",
     "merged_dual": "335L + 305 联合采集（单窗口）",
@@ -44,9 +46,10 @@ MODE_LABELS = {
 MODE_DESCRIPTIONS = {
     "rgb_dataset": "只保存 RGB 图片和 metadata.csv，可选 335L/coarse 或 305/precise。",
     "rgb_interval_305": "旧版 305 单路 RGB 单张/间隔保存工具。",
+    "rgbd_305": "打开 Gemini 305 普通 RGB-D 预览窗口，按空格/S/E 控制保存。",
     "rgbd_335l": "使用 config.yaml 启动普通 RGB-D 采集，保存 color/depth 等配置内启用的数据。",
     "dual_rgb_305": "使用 config_dual_rgb.yaml 切到 Dual Color Streams，保存 305 左右双 RGB。",
-    "merged_dual": "推荐日常使用：一个窗口同时预览两台相机，按 S/E 控制一起保存。",
+    "merged_dual": "推荐日常使用：一个窗口同时预览两台相机，按空格/S/E 控制一起保存。",
 }
 
 MODE_FIELDS = {
@@ -58,9 +61,6 @@ MODE_FIELDS = {
         "fps",
         "auto_interval",
         "session",
-        "serial",
-        "device_index",
-        "sdk_bin",
         "output_root",
         "formats",
         "png_compression",
@@ -74,37 +74,34 @@ MODE_FIELDS = {
         "save_every_seconds",
         "save_every_frames",
         "max_saves",
-        "serial",
-        "sdk_bin",
         "output_root",
         "formats",
         "start_auto",
         "no_preview",
     ],
-    "rgbd_335l": [
-        "config_path",
-        "sdk_bin",
+    "rgbd_305": [
         "output_root",
         "tag",
-        "serial",
-        "device_index",
-        "start_auto",
+    ],
+    "rgbd_335l": [
+        "output_root",
+        "tag",
     ],
     "dual_rgb_305": [
-        "config_path",
-        "sdk_bin",
         "output_root",
         "tag",
-        "serial",
-        "device_index",
-        "start_auto",
     ],
     "merged_dual": [],
 }
 
 CAMERA_TASKS = {"335L": "coarse", "305": "precise"}
 KNOWN_CAMERA_SERIALS = {"CV2L36000024", "CP28563000N0", "CP2N1630005C"}
-STANDARD_CONFIGS = {str(ROOT / "config.yaml"), str(ROOT / "config_dual_rgb.yaml"), ""}
+STANDARD_CONFIGS = {
+    str(ROOT / "config.yaml"),
+    str(ROOT / "config_305_rgbd.yaml"),
+    str(ROOT / "config_dual_rgb.yaml"),
+    "",
+}
 
 DEFAULTS = {
     "mode": "rgb_dataset",
@@ -353,7 +350,24 @@ class LauncherApp:
                 try:
                     dev = sdk.get_device(dl, idx)
                     sn, name = sdk.get_device_info(dev)
-                    devices.append({"index": str(idx), "name": name, "sn": sn})
+                    current_preset = ""
+                    presets: list[str] = []
+                    preset_error = ""
+                    try:
+                        current_preset = sdk.get_current_preset_name(dev)
+                        presets = sdk.get_available_presets(dev)
+                    except Exception as ex:
+                        preset_error = str(ex)
+                    devices.append(
+                        {
+                            "index": str(idx),
+                            "name": name,
+                            "sn": sn,
+                            "current_preset": current_preset,
+                            "presets": ", ".join(presets),
+                            "preset_error": preset_error,
+                        }
+                    )
                 finally:
                     if dev:
                         sdk.delete_device(dev)
@@ -367,7 +381,15 @@ class LauncherApp:
     def format_device_list(self, devices: list[dict[str, str]]) -> str:
         if not devices:
             return "未发现 Orbbec 设备"
-        lines = [f"Device[{d['index']}] {d['name']}  SN:{d['sn']}" for d in devices]
+        lines: list[str] = []
+        for d in devices:
+            lines.append(f"Device[{d['index']}] {d['name']}  SN:{d['sn']}")
+            if d.get("current_preset"):
+                lines.append(f"  当前模式: {d['current_preset']}")
+            if d.get("presets"):
+                lines.append(f"  可用模式: {d['presets']}")
+            elif d.get("preset_error"):
+                lines.append(f"  模式读取失败: {d['preset_error']}")
         return "\n".join(lines)
 
     def apply_device_list(self, devices: list[dict[str, str]], text: str) -> None:
@@ -402,6 +424,9 @@ class LauncherApp:
             self.on_camera_changed()
             self.vars["output_root"].set(str(ROOT / "captures" / "rgb_dataset"))
         elif mode == "rgb_interval_305":
+            self.clear_known_serial()
+            self.vars["output_root"].set(str(ROOT / "captures"))
+        elif mode == "rgbd_305":
             self.clear_known_serial()
             self.vars["output_root"].set(str(ROOT / "captures"))
         elif mode == "rgbd_335l":
@@ -479,8 +504,9 @@ class LauncherApp:
                 "--png-compression",
                 str(self.vars["png_compression"].get()).strip(),
             ]
-            self.add_common_capture_args(cmd)
-            self.add_common_device_args(cmd)
+            output_root = str(self.vars["output_root"].get()).strip()
+            if output_root:
+                cmd.extend(["--output-root", output_root])
             session = str(self.vars["session"].get()).strip()
             if session:
                 cmd.extend(["--session", session])
@@ -505,10 +531,9 @@ class LauncherApp:
                 "--fps",
                 str(self.vars["fps"].get()).strip(),
             ]
-            self.add_common_capture_args(cmd)
-            serial = str(self.vars["serial"].get()).strip()
-            if serial:
-                cmd.extend(["--serial", serial])
+            output_root = str(self.vars["output_root"].get()).strip()
+            if output_root:
+                cmd.extend(["--output-root", output_root])
             save_every_frames = str(self.vars["save_every_frames"].get()).strip()
             save_every_seconds = str(self.vars["save_every_seconds"].get()).strip()
             max_saves = str(self.vars["max_saves"].get()).strip()
@@ -528,6 +553,19 @@ class LauncherApp:
                 cmd.append("--no-preview")
             return cmd
 
+        if mode == "rgbd_305":
+            cmd = [
+                sys.executable,
+                str(SCRIPTS["rgbd_305"]),
+            ]
+            output_root = str(self.vars["output_root"].get()).strip()
+            tag = str(self.vars["tag"].get()).strip()
+            if output_root:
+                cmd.extend(["--output-root", output_root])
+            if tag:
+                cmd.extend(["--tag", tag])
+            return cmd
+
         if mode in ("rgbd_335l", "dual_rgb_305"):
             cmd = [
                 sys.executable,
@@ -535,13 +573,12 @@ class LauncherApp:
                 "--config",
                 str(self.vars["config_path"].get()).strip(),
             ]
-            self.add_common_capture_args(cmd)
-            self.add_common_device_args(cmd)
+            output_root = str(self.vars["output_root"].get()).strip()
+            if output_root:
+                cmd.extend(["--output-root", output_root])
             tag = str(self.vars["tag"].get()).strip()
             if tag:
                 cmd.extend(["--tag", tag])
-            if bool(self.vars["start_auto"].get()):
-                cmd.append("--auto-start")
             return cmd
 
         if mode == "merged_dual":

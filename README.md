@@ -42,6 +42,15 @@ python collect_orbbec_rgb_dataset.py --camera 335L --task coarse
 python collect_orbbec_rgb_dataset.py --camera 305 --task precise
 ```
 
+## 305 RGB-D Capture
+
+```powershell
+python capture_305_rgbd.py
+```
+
+This opens the normal RGB-D preview window. It does not save immediately:
+use `Space`/`S` to start saving, `Space`/`E` to stop, and `Q`/`Esc` to quit.
+
 Optional serial behavior:
 
 - leave `--serial` empty: select by camera model name
