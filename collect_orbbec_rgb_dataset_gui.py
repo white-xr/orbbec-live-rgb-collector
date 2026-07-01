@@ -39,8 +39,8 @@ MODE_LABELS = {
     "rgb_interval_305": "305 单 RGB 间隔采集",
     "rgbd_335l": "335L RGB-D 采集",
     "dual_rgb_305": "305 双 RGB 采集",
-    "merged_dual": "335L + 305 联合预览采集",
-    "both_controller": "335L + 305 同步启动采集",
+    "merged_dual": "335L + 305 联合采集（单窗口）",
+    "both_controller": "高级：335L + 305 双进程定时启动",
 }
 
 MODE_DESCRIPTIONS = {
@@ -48,8 +48,8 @@ MODE_DESCRIPTIONS = {
     "rgb_interval_305": "旧版 305 单路 RGB 单张/间隔保存工具。",
     "rgbd_335l": "使用 config.yaml 启动普通 RGB-D 采集，保存 color/depth 等配置内启用的数据。",
     "dual_rgb_305": "使用 config_dual_rgb.yaml 切到 Dual Color Streams，保存 305 左右双 RGB。",
-    "merged_dual": "单个窗口同时打开 335L RGB-D 和 305 双 RGB，适合现场联合预览。",
-    "both_controller": "启动两个独立采集进程，用控制器统一倒计时开始/停止。",
+    "merged_dual": "推荐日常使用：一个窗口同时预览两台相机，按 S/E 控制一起保存。",
+    "both_controller": "高级模式：打开两个独立采集进程，按同一时间戳定时开始；不是硬件同步。",
 }
 
 MODE_FIELDS = {
