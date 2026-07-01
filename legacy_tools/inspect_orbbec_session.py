@@ -45,6 +45,14 @@ def list_pngs(folder: Path) -> list[Path]:
     return sorted([p for p in folder.glob('*.png') if p.is_file()], key=lambda p: p.name)
 
 
+def first_existing_dir(session_dir: Path, names: tuple[str, ...]) -> Path:
+    for name in names:
+        candidate = session_dir / name
+        if candidate.exists():
+            return candidate
+    return session_dir / names[0]
+
+
 def expected_names(count: int) -> list[str]:
     return [f'{i:06d}.png' for i in range(1, count + 1)]
 
@@ -104,8 +112,8 @@ def classify(metric_name: str, value: float) -> str:
 def main() -> int:
     args = parse_args()
     session_dir = Path(args.session_dir).resolve()
-    rgb_dir = session_dir / 'rgb'
-    depth_dir = session_dir / 'depth'
+    rgb_dir = first_existing_dir(session_dir, ('color', 'rgb'))
+    depth_dir = first_existing_dir(session_dir, ('depth_raw', 'depth'))
     timestamps_path = session_dir / 'timestamps.txt'
     yaml_path = session_dir / 'camera_info.yaml'
     pose_note_path = session_dir / 'pose_note.txt'
@@ -121,6 +129,8 @@ def main() -> int:
     findings = []
     summary = {
         'session_dir': str(session_dir),
+        'rgb_dir': rgb_dir.name,
+        'depth_dir': depth_dir.name,
         'rgb_count': len(rgb_files),
         'depth_count': len(depth_files),
         'timestamps_count': len(timestamp_rows),
@@ -129,18 +139,18 @@ def main() -> int:
     }
 
     if not rgb_files:
-        findings.append({'level': 'FAIL', 'message': 'rgb folder has no PNG files'})
+        findings.append({'level': 'FAIL', 'message': f'{rgb_dir.name} folder has no PNG files'})
     if not depth_files:
-        findings.append({'level': 'FAIL', 'message': 'depth folder has no PNG files'})
+        findings.append({'level': 'FAIL', 'message': f'{depth_dir.name} folder has no PNG files'})
 
     rgb_names = [p.name for p in rgb_files]
     depth_names = [p.name for p in depth_files]
     exp_rgb = expected_names(len(rgb_names))
     exp_depth = expected_names(len(depth_names))
     if rgb_names != exp_rgb:
-        findings.append({'level': 'FAIL', 'message': 'rgb filenames are not contiguous 000001.png ...'})
+        findings.append({'level': 'FAIL', 'message': f'{rgb_dir.name} filenames are not contiguous 000001.png ...'})
     if depth_names != exp_depth:
-        findings.append({'level': 'FAIL', 'message': 'depth filenames are not contiguous 000001.png ...'})
+        findings.append({'level': 'FAIL', 'message': f'{depth_dir.name} filenames are not contiguous 000001.png ...'})
     if rgb_names != depth_names:
         findings.append({'level': 'FAIL', 'message': 'rgb/depth filenames are not exactly paired'})
     if len(rgb_names) != len(timestamp_rows):
@@ -173,10 +183,10 @@ def main() -> int:
         depth = cv2.imread(str(depth_files[idx]), cv2.IMREAD_UNCHANGED)
 
         if rgb is None:
-            findings.append({'level': 'FAIL', 'message': f'failed to read rgb/{rgb_files[idx].name}'})
+            findings.append({'level': 'FAIL', 'message': f'failed to read {rgb_dir.name}/{rgb_files[idx].name}'})
             continue
         if depth is None:
-            findings.append({'level': 'FAIL', 'message': f'failed to read depth/{depth_files[idx].name}'})
+            findings.append({'level': 'FAIL', 'message': f'failed to read {depth_dir.name}/{depth_files[idx].name}'})
             continue
 
         rgb_shapes.add((int(rgb.shape[1]), int(rgb.shape[0])))
