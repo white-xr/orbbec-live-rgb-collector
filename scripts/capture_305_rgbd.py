@@ -3,7 +3,7 @@
 """
 Gemini 305 RGB-D capture entry.
 
-This is a thin launcher around orbbec_live_capture.py with config_305_rgbd.yaml.
+This is a thin launcher around orbbec_live_capture.py with config/config_305_rgbd.yaml.
 It opens the normal RGB-D preview window and does not save immediately:
 
 - SPACE/S: start saving
@@ -20,7 +20,8 @@ import orbbec_live_capture
 
 
 ROOT = Path(__file__).resolve().parent
-CONFIG_305_RGBD = ROOT / "config_305_rgbd.yaml"
+PROJECT_ROOT = ROOT.parent
+CONFIG_305_RGBD = PROJECT_ROOT / "config" / "config_305_rgbd.yaml"
 
 
 def main() -> int:

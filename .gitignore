@@ -10,6 +10,7 @@ env/
 
 # Local collector settings
 orbbec_rgb_dataset_gui_settings.json
+config/orbbec_rgb_dataset_gui_settings.json
 
 # Captured datasets and generated camera metadata
 captures/

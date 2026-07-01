@@ -4,8 +4,8 @@
 Single-window dual Orbbec capture.
 
 One process opens:
-- Gemini 335L: RGB-D, config.yaml, selected by model name by default
-- Gemini 305 : Dual RGB, config_dual_rgb.yaml, selected by model name by default
+- Gemini 335L: RGB-D, config/config.yaml, selected by model name by default
+- Gemini 305 : Dual RGB, config/config_dual_rgb.yaml, selected by model name by default
 
 Keys:
 - S: start saving both cameras
@@ -27,8 +27,10 @@ import orbbec_live_capture as cap
 
 
 ROOT = Path(__file__).resolve().parent
-CONFIG_335L_RGBD = ROOT / "config.yaml"
-CONFIG_305_DUAL_RGB = ROOT / "config_dual_rgb.yaml"
+PROJECT_ROOT = ROOT.parent
+CONFIG_DIR = PROJECT_ROOT / "config"
+CONFIG_335L_RGBD = CONFIG_DIR / "config.yaml"
+CONFIG_305_DUAL_RGB = CONFIG_DIR / "config_dual_rgb.yaml"
 MODEL_335L = "335L"
 MODEL_305 = "305"
 WINDOW_NAME = "Orbbec 335L RGB-D + 305 Dual RGB"
@@ -213,7 +215,7 @@ def setup_camera(
     minimal_dual = bool(output_cfg.get("minimal_dual_rgb_layout", False) and save_color_left and save_color_right and not save_depth)
 
     writer = cap.SessionWriter(
-        Path(settings.get("output_root", ROOT / "captures")),
+        Path(settings.get("output_root", PROJECT_ROOT / "captures")),
         sn,
         role,
         target_width=0,
@@ -404,7 +406,7 @@ def main() -> int:
                 auto_started = True
 
             if start_req and not capturing:
-                output_root = Path(states[0]["settings"].get("output_root", ROOT / "captures"))
+                output_root = Path(states[0]["settings"].get("output_root", PROJECT_ROOT / "captures"))
                 shared_dir = make_shared_session_dir(output_root)
                 shared_dir.mkdir(parents=True, exist_ok=True)
                 write_shared_manifest(shared_dir, states)

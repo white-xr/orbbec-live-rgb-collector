@@ -78,7 +78,7 @@ PNG_COMPRESSION = 3
 INVALID_WINDOWS_FILENAME_CHARS = '<>:"/\\|?*'
 
 # Orbbec SDK property IDs. These are applied to the real camera before the RGB-D
-# pipeline starts when they are enabled in config.yaml.
+# pipeline starts when they are enabled in config/config.yaml.
 OB_PROP_LASER_BOOL = 3
 OB_PROP_LASER_CURRENT_FLOAT = 5
 OB_PROP_FLOOD_BOOL = 6
@@ -166,13 +166,16 @@ ALIGN_MODES_BY_NAME = {
     'none': (ALIGN_DISABLE, 'ALIGN_DISABLE'),
 }
 
-DEFAULT_CONFIG_PATH = Path(__file__).with_name('config.yaml')
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+CONFIG_DIR = PROJECT_ROOT / 'config'
+DEFAULT_CONFIG_PATH = CONFIG_DIR / 'config.yaml'
 
 DEFAULT_CAPTURE_CONFIG: dict[str, Any] = {
     'sdk_bin': r'D:\OrbbecSDK_v2\bin',
-    'output_root': r'D:\OrbbecLiveCollector\captures',
+    'output_root': str(PROJECT_ROOT / 'captures'),
     'output': {
-        'base_dir': r'D:\OrbbecLiveCollector\captures',
+        'base_dir': str(PROJECT_ROOT / 'captures'),
         'color_format': 'png',
         'depth_raw_format': 'png',
         'depth_vis_format': 'png',
@@ -3352,9 +3355,9 @@ def start_rgbd_pipeline(sdk: SDK, dev, device_name: str = '', settings: Optional
 
 def parse_args():
     p = argparse.ArgumentParser(description='Orbbec strict RGB-D collector')
-    p.add_argument('--config', default=str(DEFAULT_CONFIG_PATH), help='YAML/Python config file, default: config.yaml')
+    p.add_argument('--config', default=str(DEFAULT_CONFIG_PATH), help='YAML/Python config file, default: config/config.yaml')
     p.add_argument('--sdk-bin', default=r'D:\OrbbecSDK_v2\bin', help='Folder containing OrbbecSDK.dll')
-    p.add_argument('--output-root', default=r'D:\OrbbecLiveCollector\captures', help='Root output folder')
+    p.add_argument('--output-root', default=str(PROJECT_ROOT / 'captures'), help='Root output folder')
     p.add_argument('--tag', default='', help='Optional capture folder name; duplicate names get _01, _02 suffixes')
     p.add_argument('--width', type=int, default=0, help='Output width for rgb/depth PNG, 0 means keep native RGB width')
     p.add_argument('--height', type=int, default=0, help='Output height for rgb/depth PNG, 0 means keep native RGB height')

@@ -4,9 +4,9 @@ r"""
 Generic Orbbec RGB dataset collector for YOLO detection/segmentation images.
 
 Examples:
-python D:\OrbbecLiveCollector\collect_orbbec_rgb_dataset.py --camera 335L --task coarse
-python D:\OrbbecLiveCollector\collect_orbbec_rgb_dataset.py --camera 305 --task precise
-python D:\OrbbecLiveCollector\collect_orbbec_rgb_dataset.py --camera 305 --task precise --width 1280 --height 720 --fps 30
+python D:\OrbbecLiveCollector\scripts\collect_orbbec_rgb_dataset.py --camera 335L --task coarse
+python D:\OrbbecLiveCollector\scripts\collect_orbbec_rgb_dataset.py --camera 305 --task precise
+python D:\OrbbecLiveCollector\scripts\collect_orbbec_rgb_dataset.py --camera 305 --task precise --width 1280 --height 720 --fps 30
 """
 
 from __future__ import annotations
@@ -26,8 +26,9 @@ import orbbec_live_capture as cap
 
 
 ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = ROOT.parent
 DEFAULT_SDK_BIN = Path(r"D:\OrbbecSDK_v2\bin")
-DEFAULT_OUTPUT_ROOT = ROOT / "captures" / "rgb_dataset"
+DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "captures" / "rgb_dataset"
 WINDOW_NAME = "Orbbec RGB dataset collector"
 
 CAMERA_DEFAULTS = {

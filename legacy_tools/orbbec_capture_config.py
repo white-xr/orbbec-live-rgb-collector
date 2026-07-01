@@ -1,6 +1,6 @@
 # OrbbecLiveCollector 相机采集配置
 # ------------------------------------------------------------
-# 这个文件只影响 D:\OrbbecLiveCollector\orbbec_live_capture.py 的相机采集。
+# 这个文件只影响 D:\OrbbecLiveCollector\scripts\orbbec_live_capture.py 的相机采集。
 # 注意：
 # 1. 内参、畸变、外参不要手工填在这里；它们由 Orbbec SDK 在当前 pipeline 启动后读取，
 #    并保存到每次采集目录里的 camera_info.yaml 和 camera_params.json。

@@ -4,10 +4,10 @@ r"""
 查找采集序列从哪里开始掉帧。
 
 用法 1：检查单个图片目录，例如 335L color：
-python D:\OrbbecLiveCollector\find_drop_start.py D:\OrbbecLiveCollector\captures\capture_xxx\eye_to_hand_335L\color
+python D:\OrbbecLiveCollector\tools\find_drop_start.py D:\OrbbecLiveCollector\captures\capture_xxx\eye_to_hand_335L\color
 
 用法 2：检查整个合并采集会话目录：
-python D:\OrbbecLiveCollector\find_drop_start.py D:\OrbbecLiveCollector\captures\capture_xxx
+python D:\OrbbecLiveCollector\tools\find_drop_start.py D:\OrbbecLiveCollector\captures\capture_xxx
 
 默认认为 30fps 下帧间隔应约 33.33ms；超过 40ms 就算一次掉帧。
 脚本只分析，不删除、不移动任何图片。

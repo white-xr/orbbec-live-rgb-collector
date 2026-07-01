@@ -3,7 +3,7 @@ r"""
 检查一次合并采集的跨相机同步情况。
 
 用法：
-python D:\OrbbecLiveCollector\check_capture_sync.py D:\OrbbecLiveCollector\captures\capture_YYYYMMDD_HHMMSS
+python D:\OrbbecLiveCollector\tools\check_capture_sync.py D:\OrbbecLiveCollector\captures\capture_YYYYMMDD_HHMMSS
 
 说明：
 - 不修改、不移动图片。

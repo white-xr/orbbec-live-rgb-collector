@@ -24,14 +24,19 @@ from tkinter.scrolledtext import ScrolledText
 
 
 ROOT = Path(__file__).resolve().parent
-SETTINGS_FILE = ROOT / "orbbec_rgb_dataset_gui_settings.json"
+SCRIPTS_DIR = ROOT / "scripts"
+CONFIG_DIR = ROOT / "config"
+SETTINGS_FILE = CONFIG_DIR / "orbbec_rgb_dataset_gui_settings.json"
+
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
 
 SCRIPTS = {
-    "rgb_dataset": ROOT / "collect_orbbec_rgb_dataset.py",
-    "rgb_interval_305": ROOT / "capture_305_rgb_interval.py",
-    "rgbd_305": ROOT / "capture_305_rgbd.py",
-    "rgbd_config": ROOT / "orbbec_live_capture.py",
-    "merged_dual": ROOT / "merged_dual_camera_capture.py",
+    "rgb_dataset": SCRIPTS_DIR / "collect_orbbec_rgb_dataset.py",
+    "rgb_interval_305": SCRIPTS_DIR / "capture_305_rgb_interval.py",
+    "rgbd_305": SCRIPTS_DIR / "capture_305_rgbd.py",
+    "rgbd_config": SCRIPTS_DIR / "orbbec_live_capture.py",
+    "merged_dual": SCRIPTS_DIR / "merged_dual_camera_capture.py",
 }
 
 MODE_LABELS = {
@@ -47,8 +52,8 @@ MODE_DESCRIPTIONS = {
     "rgb_dataset": "只保存 RGB 图片和 metadata.csv，可选 335L/coarse 或 305/precise。",
     "rgb_interval_305": "旧版 305 单路 RGB 单张/间隔保存工具。",
     "rgbd_305": "打开 Gemini 305 普通 RGB-D 预览窗口，按空格/S/E 控制保存。",
-    "rgbd_335l": "使用 config.yaml 启动普通 RGB-D 采集，保存 color/depth 等配置内启用的数据。",
-    "dual_rgb_305": "使用 config_dual_rgb.yaml 切到 Dual Color Streams，保存 305 左右双 RGB。",
+    "rgbd_335l": "使用 config/config.yaml 启动普通 RGB-D 采集，保存 color/depth 等配置内启用的数据。",
+    "dual_rgb_305": "使用 config/config_dual_rgb.yaml 切到 Dual Color Streams，保存 305 左右双 RGB。",
     "merged_dual": "推荐日常使用：一个窗口同时预览两台相机，按空格/S/E 控制一起保存。",
 }
 
@@ -102,12 +107,30 @@ MODE_FIELDS = {
 CAMERA_TASKS = {"335L": "coarse", "305": "precise"}
 KNOWN_CAMERA_SERIALS = {"CV2L36000024", "CP28563000N0", "CP2N1630005C"}
 DUAL_COLOR_PRESET = "Dual Color Streams"
-STANDARD_CONFIGS = {
-    str(ROOT / "config.yaml"),
-    str(ROOT / "config_305_rgbd.yaml"),
-    str(ROOT / "config_dual_rgb.yaml"),
-    "",
-}
+STANDARD_CONFIG_NAMES = {"config.yaml", "config_305_rgbd.yaml", "config_dual_rgb.yaml"}
+
+
+def is_standard_config_path(value: object) -> bool:
+    raw = str(value or "").strip()
+    if not raw:
+        return True
+    path = Path(raw)
+    if path.name not in STANDARD_CONFIG_NAMES:
+        return False
+    parent = path.parent if str(path.parent) != "." else ROOT
+    try:
+        parent = parent.resolve()
+    except OSError:
+        pass
+    return parent in {ROOT.resolve(), CONFIG_DIR.resolve()}
+
+
+def normalize_standard_config_path(value: object) -> str:
+    raw = str(value or "").strip()
+    if is_standard_config_path(raw) and raw:
+        return str(CONFIG_DIR / Path(raw).name)
+    return raw
+
 PRESET_FALLBACKS = {
     "305": [
         "Default",
@@ -160,7 +183,7 @@ DEFAULTS = {
     "device_index": "",
     "sdk_bin": r"D:\OrbbecSDK_v2\bin",
     "output_root": str(ROOT / "captures" / "rgb_dataset"),
-    "config_path": str(ROOT / "config.yaml"),
+    "config_path": str(CONFIG_DIR / "config.yaml"),
     "formats": "BGR RGB MJPG YUYV BGRA RGBA UYVY",
     "png_compression": "3",
     "start_auto": False,
@@ -227,7 +250,9 @@ class LauncherApp:
         try:
             with SETTINGS_FILE.open("r", encoding="utf-8") as f:
                 loaded = json.load(f)
-            return {**DEFAULTS, **loaded}
+            data = {**DEFAULTS, **loaded}
+            data["config_path"] = normalize_standard_config_path(data.get("config_path"))
+            return data
         except Exception:
             return dict(DEFAULTS)
 
@@ -235,6 +260,7 @@ class LauncherApp:
         data = {}
         for key, var in self.vars.items():
             data[key] = bool(var.get()) if isinstance(var, BooleanVar) else str(var.get())
+        SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
         SETTINGS_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def build_ui(self) -> None:
@@ -557,13 +583,13 @@ class LauncherApp:
             self.vars["output_root"].set(str(ROOT / "captures"))
         elif mode == "rgbd_335l":
             self.clear_known_serial()
-            if self.vars["config_path"].get() in STANDARD_CONFIGS:
-                self.vars["config_path"].set(str(ROOT / "config.yaml"))
+            if is_standard_config_path(self.vars["config_path"].get()):
+                self.vars["config_path"].set(str(CONFIG_DIR / "config.yaml"))
             self.vars["output_root"].set(str(ROOT / "captures"))
         elif mode == "dual_rgb_305":
             self.clear_known_serial()
-            if self.vars["config_path"].get() in STANDARD_CONFIGS:
-                self.vars["config_path"].set(str(ROOT / "config_dual_rgb.yaml"))
+            if is_standard_config_path(self.vars["config_path"].get()):
+                self.vars["config_path"].set(str(CONFIG_DIR / "config_dual_rgb.yaml"))
             self.vars["output_root"].set(str(ROOT / "captures"))
         self.update_preset_choices(force_default=True)
 

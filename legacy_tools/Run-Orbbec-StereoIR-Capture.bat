@@ -7,5 +7,5 @@ if exist "%CONDA_ACTIVATE%" (
 ) else (
     call conda activate rgbdseg
 )
-python "%~dp0orbbec_live_capture.py" --config "%~dp0config_stereo_ir.yaml"
+python "%~dp0..\scripts\orbbec_live_capture.py" --config "%~dp0..\config\config_stereo_ir.yaml"
 pause

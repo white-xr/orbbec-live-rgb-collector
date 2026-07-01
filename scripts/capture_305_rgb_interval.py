@@ -10,9 +10,9 @@ Orbbec Gemini 305 单路 RGB 间隔采集工具。
 - 支持每 N 帧保存一张，或每 N 秒保存一张。
 
 示例：
-python D:\OrbbecLiveCollector\capture_305_rgb_interval.py
-python D:\OrbbecLiveCollector\capture_305_rgb_interval.py --save-every-seconds 2 --auto
-python D:\OrbbecLiveCollector\capture_305_rgb_interval.py --save-every-frames 30 --auto
+python D:\OrbbecLiveCollector\scripts\capture_305_rgb_interval.py
+python D:\OrbbecLiveCollector\scripts\capture_305_rgb_interval.py --save-every-seconds 2 --auto
+python D:\OrbbecLiveCollector\scripts\capture_305_rgb_interval.py --save-every-frames 30 --auto
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ import orbbec_live_capture as cap
 
 
 ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = ROOT.parent
 DEFAULT_SDK_BIN = Path(r"D:\OrbbecSDK_v2\bin")
 DEFAULT_MODEL_HINT = "305"
 WINDOW_NAME = "Orbbec 305 RGB interval capture"
@@ -129,7 +130,7 @@ def main() -> int:
     parser.add_argument("--serial", default="", help="305 序列号；留空则按型号自动选择")
     parser.add_argument("--model-hint", default=DEFAULT_MODEL_HINT, help="留空未指定序列号时，按设备型号名匹配")
     parser.add_argument("--preset", default="Default", help="启动 COLOR 流前加载的设备模式")
-    parser.add_argument("--output-root", default=str(ROOT / "captures"), help="保存根目录")
+    parser.add_argument("--output-root", default=str(PROJECT_ROOT / "captures"), help="保存根目录")
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=800)
     parser.add_argument("--fps", type=int, default=30)
