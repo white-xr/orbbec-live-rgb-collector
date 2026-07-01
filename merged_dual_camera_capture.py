@@ -4,8 +4,8 @@
 Single-window dual Orbbec capture.
 
 One process opens:
-- Gemini 335L: RGB-D, config.yaml, SN CP28563000N0
-- Gemini 305 : Dual RGB, config_dual_rgb.yaml, SN CV2L36000024
+- Gemini 335L: RGB-D, config.yaml, selected by model name by default
+- Gemini 305 : Dual RGB, config_dual_rgb.yaml, selected by model name by default
 
 Keys:
 - S: start saving both cameras
@@ -29,8 +29,8 @@ import orbbec_live_capture as cap
 ROOT = Path(__file__).resolve().parent
 CONFIG_335L_RGBD = ROOT / "config.yaml"
 CONFIG_305_DUAL_RGB = ROOT / "config_dual_rgb.yaml"
-SN_335L = "CP28563000N0"
-SN_305 = "CV2L36000024"
+MODEL_335L = "335L"
+MODEL_305 = "305"
 WINDOW_NAME = "Orbbec 335L RGB-D + 305 Dual RGB"
 CONTROL_BUTTON_RECT = (24, 724, 220, 790)
 ROLE_FOLDERS = {
@@ -163,16 +163,20 @@ def setup_camera(
     sdk: cap.SDK,
     dl,
     config_path: Path,
-    serial: str,
+    model_hint: str,
     role: str,
 ) -> dict[str, Any]:
     settings = cap.load_capture_config(config_path)
-    settings["device"]["serial"] = serial
+    device_cfg = settings.setdefault("device", {})
+    device_cfg.setdefault("model_hint", model_hint)
     output_cfg = settings.get("output", {}) or {}
     streams_cfg = settings.get("streams", {}) or {}
     pointcloud_cfg = settings.get("pointcloud", {}) or {}
 
-    dev, sn, dev_name = cap.select_device(sdk, dl, serial, None)
+    serial = str(device_cfg.get("serial", "") or "")
+    device_index = device_cfg.get("index", None)
+    device_index = None if device_index is None else int(device_index)
+    dev, sn, dev_name = cap.select_device(sdk, dl, serial, device_index, str(device_cfg.get("model_hint", model_hint) or ""))
     print(f"[{cap.now_str()}] {role}: Device {dev_name}, SN: {sn}")
     try:
         print(f"[{cap.now_str()}] {role}: Current preset: {sdk.get_current_preset_name(dev) or 'unknown'}")
@@ -361,8 +365,8 @@ def main() -> int:
         print(f"[{cap.now_str()}] Orbbec SDK version: {sdk.get_sdk_version_text()}")
         ctx = sdk.create_context()
         dl = sdk.query_device_list(ctx)
-        states.append(setup_camera(sdk, dl, CONFIG_335L_RGBD, SN_335L, "335L_rgbd"))
-        states.append(setup_camera(sdk, dl, CONFIG_305_DUAL_RGB, SN_305, "305_dual_rgb"))
+        states.append(setup_camera(sdk, dl, CONFIG_335L_RGBD, MODEL_335L, "335L_rgbd"))
+        states.append(setup_camera(sdk, dl, CONFIG_305_DUAL_RGB, MODEL_305, "305_dual_rgb"))
         for state in states:
             thread = threading.Thread(target=camera_worker, args=(sdk, state, capture_event, stop_event), daemon=True, name=f"CameraWorker-{state['role']}")
             thread.start()

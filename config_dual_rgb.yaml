@@ -36,9 +36,10 @@ streams:
   imu: false
 
 device:
-  # Dual RGB 模式固定使用 Gemini 305。
-  # 如果更换 305 设备，请把这里改成新设备序列号。
-  serial: "CV2L36000024"
+  # 默认不锁定序列号，按型号名自动选择第一台 Gemini 305。
+  # 如果现场有多台 305 且需要指定某一台，可临时填写 serial 或 index。
+  model_hint: "305"
+  serial: ""
   index: null
 
 device_preset:

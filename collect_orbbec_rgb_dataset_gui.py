@@ -31,7 +31,6 @@ SCRIPTS = {
     "rgb_interval_305": ROOT / "capture_305_rgb_interval.py",
     "rgbd_config": ROOT / "orbbec_live_capture.py",
     "merged_dual": ROOT / "merged_dual_camera_capture.py",
-    "both_controller": ROOT / "run_both_cameras.py",
 }
 
 MODE_LABELS = {
@@ -40,7 +39,6 @@ MODE_LABELS = {
     "rgbd_335l": "335L RGB-D 采集",
     "dual_rgb_305": "305 双 RGB 采集",
     "merged_dual": "335L + 305 联合采集（单窗口）",
-    "both_controller": "高级：335L + 305 双进程定时启动",
 }
 
 MODE_DESCRIPTIONS = {
@@ -49,7 +47,6 @@ MODE_DESCRIPTIONS = {
     "rgbd_335l": "使用 config.yaml 启动普通 RGB-D 采集，保存 color/depth 等配置内启用的数据。",
     "dual_rgb_305": "使用 config_dual_rgb.yaml 切到 Dual Color Streams，保存 305 左右双 RGB。",
     "merged_dual": "推荐日常使用：一个窗口同时预览两台相机，按 S/E 控制一起保存。",
-    "both_controller": "高级模式：打开两个独立采集进程，按同一时间戳定时开始；不是硬件同步。",
 }
 
 MODE_FIELDS = {
@@ -103,14 +100,10 @@ MODE_FIELDS = {
         "start_auto",
     ],
     "merged_dual": [],
-    "both_controller": ["tag", "delay"],
 }
 
-SN_335L = "CP28563000N0"
-SN_305 = "CV2L36000024"
-OLD_SN_335L = "CP2N1630005C"
 CAMERA_TASKS = {"335L": "coarse", "305": "precise"}
-KNOWN_CAMERA_SERIALS = {SN_335L, SN_305, OLD_SN_335L}
+KNOWN_CAMERA_SERIALS = {"CV2L36000024", "CP28563000N0", "CP2N1630005C"}
 STANDARD_CONFIGS = {str(ROOT / "config.yaml"), str(ROOT / "config_dual_rgb.yaml"), ""}
 
 DEFAULTS = {
@@ -126,7 +119,6 @@ DEFAULTS = {
     "max_saves": "0",
     "session": "",
     "tag": "",
-    "delay": "8.0",
     "serial": "",
     "device_index": "",
     "sdk_bin": r"D:\OrbbecSDK_v2\bin",
@@ -147,6 +139,7 @@ class LauncherApp:
         self.process: subprocess.Popen | None = None
         self.log_queue: queue.Queue[str] = queue.Queue()
         self.field_rows: dict[str, ttk.Frame] = {}
+        self.detected_devices: list[dict[str, str]] = []
         self.mode_by_label = {label: key for key, label in MODE_LABELS.items()}
 
         data = self.load_settings()
@@ -163,7 +156,6 @@ class LauncherApp:
             "max_saves": StringVar(value=data.get("max_saves", DEFAULTS["max_saves"])),
             "session": StringVar(value=data.get("session", DEFAULTS["session"])),
             "tag": StringVar(value=data.get("tag", DEFAULTS["tag"])),
-            "delay": StringVar(value=data.get("delay", DEFAULTS["delay"])),
             "serial": StringVar(value=data.get("serial", DEFAULTS["serial"])),
             "device_index": StringVar(value=data.get("device_index", DEFAULTS["device_index"])),
             "sdk_bin": StringVar(value=data.get("sdk_bin", DEFAULTS["sdk_bin"])),
@@ -180,6 +172,7 @@ class LauncherApp:
 
         self.mode_label = StringVar(value=MODE_LABELS[self.vars["mode"].get()])
         self.mode_description = StringVar(value="")
+        self.device_list_text = StringVar(value="设备列表未读取")
         self.command_preview = StringVar(value="")
         self.status = StringVar(value=f"Ready | Python: {sys.executable}")
 
@@ -187,6 +180,7 @@ class LauncherApp:
         self.on_mode_changed()
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.root.after(100, self.flush_log_queue)
+        self.root.after(300, self.refresh_devices)
 
     def load_settings(self) -> dict:
         if not SETTINGS_FILE.exists():
@@ -228,6 +222,21 @@ class LauncherApp:
             row=1, column=0, columnspan=2, sticky="w", pady=(8, 0)
         )
 
+        device_box = ttk.LabelFrame(outer, text="已连接设备", padding=12)
+        device_box.pack(fill="x", pady=(0, 10))
+        device_box.columnconfigure(0, weight=1)
+        ttk.Label(device_box, textvariable=self.device_list_text, justify="left").grid(
+            row=0, column=0, sticky="w"
+        )
+        ttk.Button(device_box, text="刷新设备", command=self.refresh_devices).grid(
+            row=0, column=1, sticky="e", padx=(12, 0)
+        )
+        ttk.Label(
+            device_box,
+            text="序列号留空时按型号自动选择；需要固定某一台时再填写 SN 或设备 Index。",
+            foreground="#666666",
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(8, 0))
+
         self.param_box = ttk.LabelFrame(outer, text="参数", padding=12)
         self.param_box.pack(fill="x", pady=(0, 10))
         self.param_box.columnconfigure(0, weight=1)
@@ -243,8 +252,7 @@ class LauncherApp:
         self.add_entry_row("max_saves", "最多保存张数", "0 表示不限")
         self.add_entry_row("session", "Session", "留空则自动使用当前时间")
         self.add_entry_row("tag", "Tag", "用于 RGB-D/双机采集的 session 标记")
-        self.add_entry_row("delay", "双机启动延迟(s)")
-        self.add_entry_row("serial", "序列号", "留空=使用脚本/配置默认；any=第一个设备")
+        self.add_entry_row("serial", "序列号", "留空=按型号自动选；any=第一个设备")
         self.add_entry_row("device_index", "设备 Index", "可留空")
         self.add_path_row("sdk_bin", "SDK bin", browse_dir=True)
         self.add_path_row("output_root", "输出目录", browse_dir=True)
@@ -316,6 +324,58 @@ class LauncherApp:
         ttk.Button(frame, text="浏览", command=lambda: self.browse_path(key, browse_dir)).grid(row=0, column=1, padx=(8, 0))
         frame.grid(row=0, column=1, sticky="ew", pady=4)
 
+    def refresh_devices(self) -> None:
+        self.device_list_text.set("正在读取 Orbbec 设备...")
+        threading.Thread(target=self.read_devices_worker, daemon=True).start()
+
+    def read_devices_worker(self) -> None:
+        try:
+            devices = self.enumerate_orbbec_devices()
+            text = self.format_device_list(devices)
+        except Exception as ex:
+            devices = []
+            text = f"读取失败: {ex}"
+        self.root.after(0, lambda: self.apply_device_list(devices, text))
+
+    def enumerate_orbbec_devices(self) -> list[dict[str, str]]:
+        import orbbec_live_capture as cap
+
+        sdk_bin = str(self.vars["sdk_bin"].get()).strip() or DEFAULTS["sdk_bin"]
+        sdk = cap.SDK(Path(sdk_bin))
+        ctx = dl = 0
+        devices: list[dict[str, str]] = []
+        try:
+            ctx = sdk.create_context()
+            dl = sdk.query_device_list(ctx)
+            count = sdk.device_count(dl)
+            for idx in range(count):
+                dev = 0
+                try:
+                    dev = sdk.get_device(dl, idx)
+                    sn, name = sdk.get_device_info(dev)
+                    devices.append({"index": str(idx), "name": name, "sn": sn})
+                finally:
+                    if dev:
+                        sdk.delete_device(dev)
+        finally:
+            if dl:
+                sdk.delete_device_list(dl)
+            if ctx:
+                sdk.delete_context(ctx)
+        return devices
+
+    def format_device_list(self, devices: list[dict[str, str]]) -> str:
+        if not devices:
+            return "未发现 Orbbec 设备"
+        lines = [f"Device[{d['index']}] {d['name']}  SN:{d['sn']}" for d in devices]
+        return "\n".join(lines)
+
+    def apply_device_list(self, devices: list[dict[str, str]], text: str) -> None:
+        self.detected_devices = devices
+        self.device_list_text.set(text)
+        if devices:
+            self.status.set(f"Ready | detected {len(devices)} Orbbec device(s)")
+
     def browse_path(self, key: str, browse_dir: bool) -> None:
         initial = str(self.vars[key].get()).strip()
         initial_path = Path(initial) if initial else ROOT
@@ -342,15 +402,15 @@ class LauncherApp:
             self.on_camera_changed()
             self.vars["output_root"].set(str(ROOT / "captures" / "rgb_dataset"))
         elif mode == "rgb_interval_305":
-            self.apply_mode_serial(SN_305)
+            self.clear_known_serial()
             self.vars["output_root"].set(str(ROOT / "captures"))
         elif mode == "rgbd_335l":
-            self.apply_mode_serial(SN_335L)
+            self.clear_known_serial()
             if self.vars["config_path"].get() in STANDARD_CONFIGS:
                 self.vars["config_path"].set(str(ROOT / "config.yaml"))
             self.vars["output_root"].set(str(ROOT / "captures"))
         elif mode == "dual_rgb_305":
-            self.apply_mode_serial(SN_305)
+            self.clear_known_serial()
             if self.vars["config_path"].get() in STANDARD_CONFIGS:
                 self.vars["config_path"].set(str(ROOT / "config_dual_rgb.yaml"))
             self.vars["output_root"].set(str(ROOT / "captures"))
@@ -373,10 +433,9 @@ class LauncherApp:
         if str(self.vars["serial"].get()).strip() in KNOWN_CAMERA_SERIALS:
             self.vars["serial"].set("")
 
-    def apply_mode_serial(self, serial: str) -> None:
-        current = str(self.vars["serial"].get()).strip()
-        if current in ("", *KNOWN_CAMERA_SERIALS):
-            self.vars["serial"].set(serial)
+    def clear_known_serial(self) -> None:
+        if str(self.vars["serial"].get()).strip() in KNOWN_CAMERA_SERIALS:
+            self.vars["serial"].set("")
 
     def reset_time_token(self) -> None:
         token = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -488,16 +547,6 @@ class LauncherApp:
         if mode == "merged_dual":
             return [sys.executable, str(SCRIPTS["merged_dual"])]
 
-        if mode == "both_controller":
-            cmd = [sys.executable, str(SCRIPTS["both_controller"])]
-            delay = str(self.vars["delay"].get()).strip()
-            tag = str(self.vars["tag"].get()).strip()
-            if delay:
-                cmd.extend(["--delay", delay])
-            if tag:
-                cmd.extend(["--tag", tag])
-            return cmd
-
         raise RuntimeError(f"unknown mode: {mode}")
 
     def update_command_preview(self) -> None:
@@ -516,7 +565,6 @@ class LauncherApp:
         numeric_fields = {
             "rgb_dataset": ["width", "height", "fps", "auto_interval", "png_compression"],
             "rgb_interval_305": ["width", "height", "fps", "save_every_seconds", "save_every_frames", "max_saves"],
-            "both_controller": ["delay"],
         }.get(mode, [])
         for key in numeric_fields:
             value = str(self.vars[key].get()).strip()
@@ -525,7 +573,7 @@ class LauncherApp:
             except ValueError:
                 messagebox.showerror("参数错误", f"{key} 必须是数字: {value}")
                 return False
-            if key in {"width", "height", "fps", "auto_interval", "delay"} and number <= 0:
+            if key in {"width", "height", "fps", "auto_interval"} and number <= 0:
                 messagebox.showerror("参数错误", f"{key} 必须大于 0")
                 return False
             if key in {"save_every_seconds", "save_every_frames", "max_saves", "png_compression"} and number < 0:
@@ -554,16 +602,13 @@ class LauncherApp:
         cmd = self.build_command()
         self.append_log("\n>>> " + subprocess.list2cmdline(cmd) + "\n")
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
-        pipe_output = self.current_mode() != "both_controller"
-        if self.current_mode() == "both_controller" and os.name == "nt":
-            creationflags |= subprocess.CREATE_NEW_CONSOLE
 
         try:
             self.process = subprocess.Popen(
                 cmd,
                 cwd=str(ROOT),
-                stdout=subprocess.PIPE if pipe_output else None,
-                stderr=subprocess.STDOUT if pipe_output else None,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
                 encoding="utf-8",
                 errors="replace",
@@ -578,10 +623,7 @@ class LauncherApp:
         self.start_button.configure(state="disabled")
         self.stop_button.configure(state="normal")
         self.status.set("Running | 预览窗口里按 q/Esc 可安全退出")
-        if pipe_output:
-            threading.Thread(target=self.read_process_output, daemon=True).start()
-        else:
-            self.append_log("双进程控制器已在独立窗口中运行，日志请看新窗口。\n")
+        threading.Thread(target=self.read_process_output, daemon=True).start()
         self.root.after(500, self.check_process)
 
     def read_process_output(self) -> None:

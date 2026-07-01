@@ -499,6 +499,8 @@ def apply_config_defaults_to_args(args, settings: dict[str, Any]) -> None:
         args.device_index = None if index is None else int(index)
     if not cli_option_present('--serial'):
         args.serial = str(device_cfg.get('serial', args.serial) or '')
+    if not cli_option_present('--model-hint'):
+        args.model_hint = str(device_cfg.get('model_hint', args.model_hint) or '')
 
 
 def validate_capture_settings(settings: dict[str, Any]) -> None:
@@ -3324,13 +3326,18 @@ def parse_args():
     p.add_argument('--max-sync-diff-ms', type=float, default=15.0, help='Max allowed |rgb_ts-depth_ts| in ms')
     p.add_argument('--device-index', type=int, default=None, help='Orbbec device index to use when multiple cameras are connected')
     p.add_argument('--serial', default='', help='Orbbec camera serial number to use when multiple cameras are connected')
+    p.add_argument('--model-hint', default='', help='Select first device whose model name contains this text, e.g. 335L or 305')
     p.add_argument('--auto-start', action='store_true', help='Start saving automatically after camera pipeline is ready')
     p.add_argument('--auto-start-at', type=float, default=0.0, help='Unix timestamp seconds for scheduled auto start')
     p.add_argument('--stop-file', default='', help='Stop saving when this file exists, used by multi-camera controller')
     return p.parse_args()
 
 
-def select_device(sdk: SDK, dl, serial: str, device_index: Optional[int]):
+def normalize_device_match_text(text: str) -> str:
+    return ''.join(ch for ch in str(text or '').lower() if ch.isalnum())
+
+
+def select_device(sdk: SDK, dl, serial: str, device_index: Optional[int], model_hint: str = ''):
     count = sdk.device_count(dl)
     if count < 1:
         raise RuntimeError('No Orbbec device found.')
@@ -3338,20 +3345,29 @@ def select_device(sdk: SDK, dl, serial: str, device_index: Optional[int]):
         raise RuntimeError(f'--device-index {device_index} is out of range, found {count} device(s).')
 
     serial_filter = serial.strip().lower()
+    if serial_filter in ('auto', 'none'):
+        serial_filter = ''
+    model_filter = normalize_device_match_text(model_hint)
     print(f'[{now_str()}] Found {count} Orbbec device(s).')
     selected_dev = 0
     selected_sn = ''
     selected_name = ''
+    selected_by_model = False
     for idx in range(count):
         dev = 0
         try:
             dev = sdk.get_device(dl, idx)
             sn, name = sdk.get_device_info(dev)
             print(f'[{now_str()}] Device[{idx}]: {name}, SN: {sn}')
-            if serial_filter:
+            if serial_filter == 'any':
+                selected = idx == 0
+            elif serial_filter:
                 selected = sn.strip().lower() == serial_filter
             elif device_index is not None:
                 selected = idx == device_index
+            elif model_filter:
+                selected = model_filter in normalize_device_match_text(name)
+                selected_by_model = selected
             else:
                 selected = idx == 0
             if selected:
@@ -3365,8 +3381,17 @@ def select_device(sdk: SDK, dl, serial: str, device_index: Optional[int]):
                 sdk.delete_device(dev)
 
     if not selected_dev:
-        selector = f'SN {serial}' if serial_filter else f'index {device_index}'
+        if serial_filter and serial_filter != 'any':
+            selector = f'SN {serial}'
+        elif device_index is not None:
+            selector = f'index {device_index}'
+        elif model_filter:
+            selector = f'model hint {model_hint}'
+        else:
+            selector = 'first device'
         raise RuntimeError(f'No Orbbec device matched {selector}.')
+    if selected_by_model:
+        print(f'[{now_str()}] Auto-selected by model hint "{model_hint}". SN: {selected_sn}')
     return selected_dev, selected_sn, selected_name
 
 
@@ -3422,7 +3447,7 @@ def main() -> int:
         print(f'[{now_str()}] Orbbec SDK version: {sdk_version}')
         ctx = sdk.create_context()
         dl = sdk.query_device_list(ctx)
-        dev, sn, dev_name = select_device(sdk, dl, args.serial, args.device_index)
+        dev, sn, dev_name = select_device(sdk, dl, args.serial, args.device_index, args.model_hint)
         print(f'[{now_str()}] Device: {dev_name}, SN: {sn}')
         try:
             device_info_detail = sdk.get_device_info_detail(dev)

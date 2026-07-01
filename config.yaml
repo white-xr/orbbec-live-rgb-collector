@@ -29,9 +29,10 @@ streams:
   imu: false
 
 device:
-  # RGB-D 模式固定使用 Gemini 335L。
-  # 如果更换 335L 设备，请把这里改成新设备序列号。
-  serial: "CP28563000N0"
+  # 默认不锁定序列号，按型号名自动选择第一台 Gemini 335L。
+  # 如果现场有多台 335L 且需要指定某一台，可临时填写 serial 或 index。
+  model_hint: "335L"
+  serial: ""
   index: null
 
 device_preset:
@@ -145,7 +146,6 @@ intrinsics_reference:
       cx: 422.01251221
       cy: 244.96875000
       distortion: [0.0, 0.0, 0.0, 0.0, 0.0]
-
 
 
 

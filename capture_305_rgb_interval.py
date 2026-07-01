@@ -31,7 +31,7 @@ import orbbec_live_capture as cap
 
 ROOT = Path(__file__).resolve().parent
 DEFAULT_SDK_BIN = Path(r"D:\OrbbecSDK_v2\bin")
-DEFAULT_SN_305 = "CV2L36000024"
+DEFAULT_MODEL_HINT = "305"
 WINDOW_NAME = "Orbbec 305 RGB interval capture"
 CONTROL_BUTTON_RECT = (24, 704, 230, 780)
 
@@ -126,7 +126,8 @@ def save_frame(images_dir: Path, timestamps_file, frame, frame_fd: cap.FrameData
 def main() -> int:
     parser = argparse.ArgumentParser(description="Gemini 305 单路 RGB 单张/间隔采集")
     parser.add_argument("--sdk-bin", default=str(DEFAULT_SDK_BIN), help="Orbbec SDK bin 路径")
-    parser.add_argument("--serial", default=DEFAULT_SN_305, help="305 序列号")
+    parser.add_argument("--serial", default="", help="305 序列号；留空则按型号自动选择")
+    parser.add_argument("--model-hint", default=DEFAULT_MODEL_HINT, help="留空未指定序列号时，按设备型号名匹配")
     parser.add_argument("--output-root", default=str(ROOT / "captures"), help="保存根目录")
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=800)
@@ -163,7 +164,7 @@ def main() -> int:
         print(f"[{cap.now_str()}] Orbbec SDK version: {sdk.get_sdk_version_text()}")
         ctx = sdk.create_context()
         dl = sdk.query_device_list(ctx)
-        dev, sn, dev_name = cap.select_device(sdk, dl, str(args.serial), None)
+        dev, sn, dev_name = cap.select_device(sdk, dl, str(args.serial), None, str(args.model_hint))
         print(f"[{cap.now_str()}] Device: {dev_name}, SN: {sn}")
 
         settings = {
