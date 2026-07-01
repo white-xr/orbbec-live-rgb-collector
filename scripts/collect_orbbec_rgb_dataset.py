@@ -42,13 +42,6 @@ CAMERA_DEFAULTS = {
     },
 }
 
-TAG_BY_KEY = {
-    ord("1"): "base",
-    ord("2"): "cover",
-    ord("3"): "both",
-    ord("0"): "empty",
-}
-
 DEFAULT_COLOR_FORMATS = ["BGR", "RGB", "MJPG", "YUYV", "BGRA", "RGBA", "UYVY"]
 DEFAULT_COLOR_FORMAT_IDS = [
     cap.OB_FORMAT_BGR,
@@ -71,7 +64,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--auto-interval", type=float, default=1.0, help="Seconds between auto saves.")
     parser.add_argument("--sdk-bin", default=str(DEFAULT_SDK_BIN), help="Folder containing OrbbecSDK.dll.")
     parser.add_argument("--output-root", default=str(DEFAULT_OUTPUT_ROOT), help="Root folder for dataset sessions.")
-    parser.add_argument("--session", default="", help="Session token used in filenames; default is current time.")
+    parser.add_argument("--session", default="", help="Session folder token; default is current time.")
     parser.add_argument(
         "--serial",
         default="",
@@ -81,8 +74,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--preset", default="Default", help="Device preset to load before starting COLOR stream.")
     parser.add_argument("--formats", nargs="+", default=DEFAULT_COLOR_FORMATS, help="Preferred COLOR formats.")
     parser.add_argument("--png-compression", type=int, default=3, help="PNG compression 0..9.")
-    parser.add_argument("--start-auto", action="store_true", help="Start with auto save enabled.")
-    parser.add_argument("--no-preview", action="store_true", help="Run without preview; useful only with --start-auto.")
+    parser.add_argument("--start-auto", action="store_true", help="Use auto save mode; press Space/S to start or stop.")
+    parser.add_argument("--no-preview", action="store_true", help="Run without preview; useful for non-interactive tests only.")
     return parser.parse_args()
 
 
@@ -238,8 +231,8 @@ def draw_overlay(
     height: int,
     fps: int,
     measured_fps: float,
-    tag: str,
-    auto_enabled: bool,
+    auto_mode: bool,
+    auto_running: bool,
     auto_interval: float,
     saved_count: int,
 ):
@@ -249,8 +242,8 @@ def draw_overlay(
         f"task: {task}",
         f"resolution: {width}x{height}",
         f"fps: {fps} target / {measured_fps:.1f} live",
-        f"current tag: {tag}",
-        f"save mode: {'auto' if auto_enabled else 'manual'}",
+        f"save mode: {'auto' if auto_mode else 'manual'}",
+        f"auto status: {'running' if auto_running else 'idle'}",
         f"auto interval: {auto_interval:g}s",
         f"saved count: {saved_count}",
     ]
@@ -365,7 +358,7 @@ def open_metadata_csv(session_dir: Path):
     file_obj = path.open("w", encoding="utf-8", newline="")
     writer = csv.DictWriter(
         file_obj,
-        fieldnames=["filename", "timestamp", "camera", "task", "width", "height", "fps", "tag", "save_mode"],
+        fieldnames=["filename", "timestamp", "camera", "task", "width", "height", "fps", "save_mode"],
     )
     writer.writeheader()
     file_obj.flush()
@@ -379,15 +372,13 @@ def save_rgb_png(
     image,
     camera: str,
     task: str,
-    tag: str,
-    session: str,
     index: int,
     width: int,
     height: int,
     fps: int,
     save_mode: str,
 ) -> str:
-    filename = f"{camera}_{task}_{tag}_{session}_{index:06d}.png"
+    filename = f"{index:06d}.png"
     path = session_dir / filename
     cap.write_png_file(path, image)
     metadata_writer.writerow(
@@ -399,7 +390,6 @@ def save_rgb_png(
             "width": int(width),
             "height": int(height),
             "fps": int(fps),
-            "tag": tag,
             "save_mode": save_mode,
         }
     )
@@ -500,15 +490,15 @@ def main() -> int:
             f"{cap.format_name(profile['format'])}"
         )
         print(f"[{cap.now_str()}] Save dir: {session_dir}")
-        print("Keys: 1=base | 2=cover | 3=both | 0=empty | S/SPACE=save | A=auto on/off | Q/ESC=quit")
+        print("Keys: A=manual/auto mode | S/SPACE=save once or start/stop auto | Q/ESC=quit")
 
         if not args.no_preview:
             preview_window = PreviewWindow(WINDOW_NAME, actual_width, actual_height)
 
-        current_tag = "empty"
-        auto_enabled = bool(args.start_auto)
+        auto_mode = bool(args.start_auto)
+        auto_running = bool(args.no_preview and args.start_auto)
         saved_count = 0
-        last_auto_save = time.perf_counter()
+        last_auto_save = time.perf_counter() - float(args.auto_interval)
         measured_fps = 0.0
         fps_frames = 0
         fps_t0 = time.perf_counter()
@@ -553,8 +543,8 @@ def main() -> int:
                     int(fd.height) if fd else actual_height,
                     actual_fps,
                     measured_fps,
-                    current_tag,
-                    auto_enabled,
+                    auto_mode,
+                    auto_running,
                     float(args.auto_interval),
                     saved_count,
                 )
@@ -564,17 +554,20 @@ def main() -> int:
 
             if key in (ord("q"), ord("Q"), 27):
                 break
-            if key in TAG_BY_KEY:
-                current_tag = TAG_BY_KEY[key]
-                print(f"[{cap.now_str()}] tag = {current_tag}")
             if key in (ord("a"), ord("A")):
-                auto_enabled = not auto_enabled
-                last_auto_save = now_perf
-                print(f"[{cap.now_str()}] auto save {'ON' if auto_enabled else 'OFF'}")
+                auto_mode = not auto_mode
+                auto_running = False
+                last_auto_save = now_perf - float(args.auto_interval)
+                print(f"[{cap.now_str()}] save mode = {'auto' if auto_mode else 'manual'}")
             if key in (ord("s"), ord("S"), 32):
-                manual_save = True
+                if auto_mode:
+                    auto_running = not auto_running
+                    last_auto_save = now_perf - float(args.auto_interval)
+                    print(f"[{cap.now_str()}] auto save {'START' if auto_running else 'STOP'}")
+                else:
+                    manual_save = True
 
-            auto_due = auto_enabled and (now_perf - last_auto_save) >= float(args.auto_interval)
+            auto_due = auto_mode and auto_running and (now_perf - last_auto_save) >= float(args.auto_interval)
             save_mode = ""
             if manual_save:
                 save_mode = "manual"
@@ -590,20 +583,18 @@ def main() -> int:
                     image,
                     args.camera,
                     args.task,
-                    current_tag,
-                    session,
                     saved_count,
                     int(fd.width) if fd else actual_width,
                     int(fd.height) if fd else actual_height,
                     actual_fps,
                     save_mode,
                 )
-                if auto_enabled:
+                if auto_mode:
                     last_auto_save = now_perf
-                print(f"[{cap.now_str()}] saved {filename} ({save_mode}, tag={current_tag})")
+                print(f"[{cap.now_str()}] saved {filename} ({save_mode})")
 
-            if args.no_preview and not auto_enabled:
-                print(f"[{cap.now_str()}] --no-preview without auto save has nothing to do; exiting.")
+            if args.no_preview and not auto_running:
+                print(f"[{cap.now_str()}] --no-preview is idle; exiting.")
                 break
 
         print(f"[{cap.now_str()}] Exit. Saved count: {saved_count}")

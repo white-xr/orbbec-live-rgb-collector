@@ -18,22 +18,18 @@ Depth, IR, D2C, and point clouds are not saved in this dataset mode.
 
 Keyboard controls in the preview window:
 
-- `1`: `base`
-- `2`: `cover`
-- `3`: `both`
-- `0`: `empty`
-- `s` or `Space`: save current RGB frame
-- `a`: toggle automatic saving
+- `s` or `Space`: save one RGB frame in manual mode; start/stop saving in auto mode
+- `a`: toggle manual/auto mode
 - `q` or `Esc`: quit safely
 
 Saved images use:
 
 ```text
-{camera}_{task}_{tag}_{session}_{index:06d}.png
+{index:06d}.png
 ```
 
 Each session also writes `metadata.csv` with filename, timestamp, camera, task,
-resolution, FPS, tag, and save mode.
+resolution, FPS, and save mode.
 
 ## Command Line Example
 

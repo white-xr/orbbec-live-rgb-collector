@@ -331,7 +331,7 @@ class LauncherApp:
         self.add_path_row("config_path", "配置文件", browse_dir=False)
         self.add_entry_row("formats", "COLOR 格式优先级")
         self.add_entry_row("png_compression", "PNG 压缩", "0 最快，9 最小")
-        self.add_check_row("start_auto", "启动后自动保存")
+        self.add_check_row("start_auto", "自动保存模式")
         self.add_check_row("no_preview", "无预览窗口")
         self.empty_params_note = ttk.Label(
             self.param_box,
