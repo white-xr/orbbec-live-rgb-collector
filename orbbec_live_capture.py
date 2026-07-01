@@ -75,6 +75,7 @@ FORMAT_NAMES = {
 FORMAT_IDS_BY_NAME = {name: fmt for fmt, name in FORMAT_NAMES.items()}
 DUAL_COLOR_PRESET_NAME = 'Dual Color Streams'
 PNG_COMPRESSION = 3
+INVALID_WINDOWS_FILENAME_CHARS = '<>:"/\\|?*'
 
 # Orbbec SDK property IDs. These are applied to the real camera before the RGB-D
 # pipeline starts when they are enabled in config.yaml.
@@ -1755,7 +1756,7 @@ class SessionWriter:
     ):
         self.root = root
         self.sn = sn
-        self.tag = tag.strip().replace(' ', '_')
+        self.tag = self.sanitize_folder_name(tag)
         self.target_width = int(target_width)
         self.target_height = int(target_height)
         self.align_mode_name = align_mode_name
@@ -1894,8 +1895,7 @@ class SessionWriter:
             raise RuntimeError(f'Background writer failed: {self.write_error}')
 
     def _unique_dir(self) -> Path:
-        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
-        base = f'capture_{ts}'
+        base = self.tag or f'capture_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
         path = self.root / base
         if not path.exists():
             return path
@@ -1905,6 +1905,19 @@ class SessionWriter:
             if not candidate.exists():
                 return candidate
             i += 1
+
+    @staticmethod
+    def sanitize_folder_name(value: str) -> str:
+        text = str(value or '').strip()
+        cleaned = []
+        for ch in text:
+            if ord(ch) < 32 or ch in INVALID_WINDOWS_FILENAME_CHARS:
+                cleaned.append('_')
+            elif ch.isspace():
+                cleaned.append('_')
+            else:
+                cleaned.append(ch)
+        return ''.join(cleaned).strip(' ._')
 
     def _build_camera_info_yaml(self) -> str:
         cp = self.camera_params or {}
@@ -3334,7 +3347,7 @@ def parse_args():
     p.add_argument('--config', default=str(DEFAULT_CONFIG_PATH), help='YAML/Python config file, default: config.yaml')
     p.add_argument('--sdk-bin', default=r'D:\OrbbecSDK_v2\bin', help='Folder containing OrbbecSDK.dll')
     p.add_argument('--output-root', default=r'D:\OrbbecLiveCollector\captures', help='Root output folder')
-    p.add_argument('--tag', default='', help='Optional tag recorded in pose_note.txt and camera_info.yaml')
+    p.add_argument('--tag', default='', help='Optional capture folder name; duplicate names get _01, _02 suffixes')
     p.add_argument('--width', type=int, default=0, help='Output width for rgb/depth PNG, 0 means keep native RGB width')
     p.add_argument('--height', type=int, default=0, help='Output height for rgb/depth PNG, 0 means keep native RGB height')
     p.add_argument('--max-sync-diff-ms', type=float, default=15.0, help='Max allowed |rgb_ts-depth_ts| in ms')

@@ -290,7 +290,7 @@ class LauncherApp:
         self.add_entry_row("save_every_frames", "间隔保存帧数", "0 表示不用帧间隔")
         self.add_entry_row("max_saves", "最多保存张数", "0 表示不限")
         self.add_entry_row("session", "Session", "留空则自动使用当前时间")
-        self.add_entry_row("tag", "Tag", "用于 RGB-D/双机采集的 session 标记")
+        self.add_entry_row("tag", "保存文件夹名", "留空=自动使用 capture_时间；重名自动加 _01")
         self.preset_combo = self.add_combo_row(
             "device_preset",
             "设备模式",
@@ -321,7 +321,7 @@ class LauncherApp:
         self.stop_button.pack(side="left", padx=(8, 0))
         ttk.Button(buttons, text="复制命令", command=self.copy_command).pack(side="left", padx=(8, 0))
         ttk.Button(buttons, text="打开输出目录", command=self.open_output_root).pack(side="left", padx=(8, 0))
-        ttk.Button(buttons, text="重置时间标记", command=self.reset_time_token).pack(side="right")
+        ttk.Button(buttons, text="用当前时间命名", command=self.reset_time_token).pack(side="right")
 
         command_box = ttk.LabelFrame(outer, text="将执行的命令", padding=8)
         command_box.pack(fill="x", pady=(0, 10))
