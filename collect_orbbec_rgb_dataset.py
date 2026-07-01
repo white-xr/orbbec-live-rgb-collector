@@ -77,6 +77,7 @@ def parse_args() -> argparse.Namespace:
         help="Override camera serial. Empty/auto selects by camera model name; any selects the first device.",
     )
     parser.add_argument("--device-index", type=int, default=None, help="Select by Orbbec device index instead of serial.")
+    parser.add_argument("--preset", default="Default", help="Device preset to load before starting COLOR stream.")
     parser.add_argument("--formats", nargs="+", default=DEFAULT_COLOR_FORMATS, help="Preferred COLOR formats.")
     parser.add_argument("--png-compression", type=int, default=3, help="PNG compression 0..9.")
     parser.add_argument("--start-auto", action="store_true", help="Start with auto save enabled.")
@@ -156,15 +157,19 @@ def select_color_profile(
     raise RuntimeError(f"No COLOR {width}x{height}@{fps} profile found.")
 
 
-def maybe_switch_to_default_preset(sdk: cap.SDK, dev, device_name: str) -> None:
+def maybe_switch_device_preset(sdk: cap.SDK, dev, device_name: str, preset_name: str) -> None:
+    target = str(preset_name or "").strip()
+    if not target:
+        print(f"[{cap.now_str()}] Device preset switch skipped.")
+        return
     settings = {
-        "device_preset": {"enabled": True, "name": "Default", "required": False, "settle_ms": 800},
+        "device_preset": {"enabled": True, "name": target, "required": False, "settle_ms": 800},
         "streams": {"color": True, "depth": False, "color_left": False, "color_right": False},
     }
     try:
         cap.switch_device_preset_if_configured(sdk, dev, device_name, settings)
     except Exception as ex:
-        print(f"[{cap.now_str()}] WARN preset switch to Default failed; continue with current preset: {ex}")
+        print(f"[{cap.now_str()}] WARN preset switch to {target} failed; continue with current preset: {ex}")
 
 
 def select_device_for_camera(
@@ -457,7 +462,7 @@ def main() -> int:
         if name_hint not in device_name.lower():
             print(f"[{cap.now_str()}] WARN selected device name does not look like Gemini {args.camera}: {device_name}")
 
-        maybe_switch_to_default_preset(sdk, dev, device_name)
+        maybe_switch_device_preset(sdk, dev, device_name, args.preset)
 
         pipe = sdk.create_pipeline(dev)
         profile = select_color_profile(

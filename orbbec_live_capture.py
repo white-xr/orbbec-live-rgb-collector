@@ -3327,6 +3327,7 @@ def parse_args():
     p.add_argument('--device-index', type=int, default=None, help='Orbbec device index to use when multiple cameras are connected')
     p.add_argument('--serial', default='', help='Orbbec camera serial number to use when multiple cameras are connected')
     p.add_argument('--model-hint', default='', help='Select first device whose model name contains this text, e.g. 335L or 305')
+    p.add_argument('--preset', default='', help='Override device preset name, e.g. Default or Dual Color Streams')
     p.add_argument('--auto-start', action='store_true', help='Start saving automatically after camera pipeline is ready')
     p.add_argument('--auto-start-at', type=float, default=0.0, help='Unix timestamp seconds for scheduled auto start')
     p.add_argument('--stop-file', default='', help='Stop saving when this file exists, used by multi-camera controller')
@@ -3401,6 +3402,11 @@ def main() -> int:
     config_path = Path(args.config).expanduser()
     settings = load_capture_config(config_path)
     apply_config_defaults_to_args(args, settings)
+    if str(args.preset or '').strip():
+        preset_cfg = settings.setdefault('device_preset', {})
+        preset_cfg['enabled'] = True
+        preset_cfg['name'] = str(args.preset).strip()
+        preset_cfg['required'] = True
     validate_capture_settings(settings)
     PNG_COMPRESSION = int((settings.get('output', {}) or {}).get('png_compression', PNG_COMPRESSION))
     print(f'[{now_str()}] Capture config: {config_path}')

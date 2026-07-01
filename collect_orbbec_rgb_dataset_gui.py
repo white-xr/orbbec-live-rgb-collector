@@ -56,6 +56,7 @@ MODE_FIELDS = {
     "rgb_dataset": [
         "camera",
         "task",
+        "device_preset",
         "width",
         "height",
         "fps",
@@ -68,6 +69,7 @@ MODE_FIELDS = {
         "no_preview",
     ],
     "rgb_interval_305": [
+        "device_preset",
         "width",
         "height",
         "fps",
@@ -82,14 +84,17 @@ MODE_FIELDS = {
     "rgbd_305": [
         "output_root",
         "tag",
+        "device_preset",
     ],
     "rgbd_335l": [
         "output_root",
         "tag",
+        "device_preset",
     ],
     "dual_rgb_305": [
         "output_root",
         "tag",
+        "device_preset",
     ],
     "merged_dual": [],
 }
@@ -101,6 +106,39 @@ STANDARD_CONFIGS = {
     str(ROOT / "config_305_rgbd.yaml"),
     str(ROOT / "config_dual_rgb.yaml"),
     "",
+}
+PRESET_FALLBACKS = {
+    "305": [
+        "Default",
+        "High Accuracy",
+        "Close Range High Accuracy",
+        "Close Range Default",
+        "Factory Calib",
+        "Dual Color Streams",
+        "Custom",
+    ],
+    "335L": [
+        "Default",
+        "Hand",
+        "High Accuracy",
+        "High Density",
+        "Medium Density",
+        "Factory Calib",
+        "Custom",
+    ],
+}
+MODE_CAMERA_HINTS = {
+    "rgb_interval_305": "305",
+    "rgbd_305": "305",
+    "rgbd_335l": "335L",
+    "dual_rgb_305": "305",
+}
+MODE_DEFAULT_PRESETS = {
+    "rgb_dataset": "Default",
+    "rgb_interval_305": "Default",
+    "rgbd_305": "Default",
+    "rgbd_335l": "Default",
+    "dual_rgb_305": "Dual Color Streams",
 }
 
 DEFAULTS = {
@@ -116,6 +154,7 @@ DEFAULTS = {
     "max_saves": "0",
     "session": "",
     "tag": "",
+    "device_preset": "Default",
     "serial": "",
     "device_index": "",
     "sdk_bin": r"D:\OrbbecSDK_v2\bin",
@@ -136,7 +175,8 @@ class LauncherApp:
         self.process: subprocess.Popen | None = None
         self.log_queue: queue.Queue[str] = queue.Queue()
         self.field_rows: dict[str, ttk.Frame] = {}
-        self.detected_devices: list[dict[str, str]] = []
+        self.detected_devices: list[dict[str, object]] = []
+        self.preset_combo: ttk.Combobox | None = None
         self.mode_by_label = {label: key for key, label in MODE_LABELS.items()}
 
         data = self.load_settings()
@@ -153,6 +193,7 @@ class LauncherApp:
             "max_saves": StringVar(value=data.get("max_saves", DEFAULTS["max_saves"])),
             "session": StringVar(value=data.get("session", DEFAULTS["session"])),
             "tag": StringVar(value=data.get("tag", DEFAULTS["tag"])),
+            "device_preset": StringVar(value=data.get("device_preset", DEFAULTS["device_preset"])),
             "serial": StringVar(value=data.get("serial", DEFAULTS["serial"])),
             "device_index": StringVar(value=data.get("device_index", DEFAULTS["device_index"])),
             "sdk_bin": StringVar(value=data.get("sdk_bin", DEFAULTS["sdk_bin"])),
@@ -249,6 +290,13 @@ class LauncherApp:
         self.add_entry_row("max_saves", "最多保存张数", "0 表示不限")
         self.add_entry_row("session", "Session", "留空则自动使用当前时间")
         self.add_entry_row("tag", "Tag", "用于 RGB-D/双机采集的 session 标记")
+        self.preset_combo = self.add_combo_row(
+            "device_preset",
+            "设备模式",
+            [],
+            None,
+            "启动采集前加载的 Orbbec device preset",
+        )
         self.add_entry_row("serial", "序列号", "留空=按型号自动选；any=第一个设备")
         self.add_entry_row("device_index", "设备 Index", "可留空")
         self.add_path_row("sdk_bin", "SDK bin", browse_dir=True)
@@ -302,12 +350,13 @@ class LauncherApp:
         row = self.add_field_row(key, label, hint)
         ttk.Entry(row, textvariable=self.vars[key]).grid(row=0, column=1, sticky="ew", pady=4)
 
-    def add_combo_row(self, key: str, label: str, values: list[str], command=None, hint: str = "") -> None:
+    def add_combo_row(self, key: str, label: str, values: list[str], command=None, hint: str = "") -> ttk.Combobox:
         row = self.add_field_row(key, label, hint)
         combo = ttk.Combobox(row, textvariable=self.vars[key], values=values, state="readonly")
         if command is not None:
             combo.bind("<<ComboboxSelected>>", lambda _event: command())
         combo.grid(row=0, column=1, sticky="ew", pady=4)
+        return combo
 
     def add_check_row(self, key: str, label: str) -> None:
         row = self.add_field_row(key, "")
@@ -334,13 +383,13 @@ class LauncherApp:
             text = f"读取失败: {ex}"
         self.root.after(0, lambda: self.apply_device_list(devices, text))
 
-    def enumerate_orbbec_devices(self) -> list[dict[str, str]]:
+    def enumerate_orbbec_devices(self) -> list[dict[str, object]]:
         import orbbec_live_capture as cap
 
         sdk_bin = str(self.vars["sdk_bin"].get()).strip() or DEFAULTS["sdk_bin"]
         sdk = cap.SDK(Path(sdk_bin))
         ctx = dl = 0
-        devices: list[dict[str, str]] = []
+        devices: list[dict[str, object]] = []
         try:
             ctx = sdk.create_context()
             dl = sdk.query_device_list(ctx)
@@ -365,6 +414,7 @@ class LauncherApp:
                             "sn": sn,
                             "current_preset": current_preset,
                             "presets": ", ".join(presets),
+                            "preset_names": presets,
                             "preset_error": preset_error,
                         }
                     )
@@ -378,7 +428,7 @@ class LauncherApp:
                 sdk.delete_context(ctx)
         return devices
 
-    def format_device_list(self, devices: list[dict[str, str]]) -> str:
+    def format_device_list(self, devices: list[dict[str, object]]) -> str:
         if not devices:
             return "未发现 Orbbec 设备"
         lines: list[str] = []
@@ -392,11 +442,12 @@ class LauncherApp:
                 lines.append(f"  模式读取失败: {d['preset_error']}")
         return "\n".join(lines)
 
-    def apply_device_list(self, devices: list[dict[str, str]], text: str) -> None:
+    def apply_device_list(self, devices: list[dict[str, object]], text: str) -> None:
         self.detected_devices = devices
         self.device_list_text.set(text)
         if devices:
             self.status.set(f"Ready | detected {len(devices)} Orbbec device(s)")
+        self.update_preset_choices()
 
     def browse_path(self, key: str, browse_dir: bool) -> None:
         initial = str(self.vars[key].get()).strip()
@@ -411,6 +462,65 @@ class LauncherApp:
     def current_mode(self) -> str:
         mode = str(self.vars["mode"].get())
         return mode if mode in MODE_LABELS else "rgb_dataset"
+
+    @staticmethod
+    def normalize_device_text(text: str) -> str:
+        return "".join(ch for ch in str(text or "").lower() if ch.isalnum())
+
+    @staticmethod
+    def ordered_unique(values: list[str]) -> list[str]:
+        seen: set[str] = set()
+        result: list[str] = []
+        for value in values:
+            text = str(value or "").strip()
+            key = text.lower()
+            if text and key not in seen:
+                seen.add(key)
+                result.append(text)
+        return result
+
+    def camera_hint_for_current_mode(self) -> str:
+        mode = self.current_mode()
+        if mode == "rgb_dataset":
+            return str(self.vars["camera"].get()).strip() or "335L"
+        return MODE_CAMERA_HINTS.get(mode, "")
+
+    def preset_values_for_current_mode(self) -> list[str]:
+        camera_hint = self.camera_hint_for_current_mode()
+        if not camera_hint:
+            return []
+
+        normalized_hint = self.normalize_device_text(camera_hint)
+        detected_values: list[str] = []
+        for device in self.detected_devices:
+            name = str(device.get("name", ""))
+            if normalized_hint and normalized_hint not in self.normalize_device_text(name):
+                continue
+            preset_names = device.get("preset_names", [])
+            if isinstance(preset_names, str):
+                detected_values.extend([item.strip() for item in preset_names.split(",")])
+            elif isinstance(preset_names, list):
+                detected_values.extend([str(item).strip() for item in preset_names])
+
+        values = self.ordered_unique(detected_values)
+        if values:
+            return values
+        return list(PRESET_FALLBACKS.get(camera_hint, ["Default"]))
+
+    def update_preset_choices(self, force_default: bool = False) -> None:
+        values = self.preset_values_for_current_mode()
+        if self.preset_combo is not None:
+            self.preset_combo.configure(values=values)
+        if not values:
+            return
+
+        current = str(self.vars["device_preset"].get()).strip()
+        default = MODE_DEFAULT_PRESETS.get(self.current_mode(), "Default")
+        target = current
+        if force_default or not current or current not in values:
+            target = default if default in values else values[0]
+        if target != current:
+            self.vars["device_preset"].set(target)
 
     def on_mode_label_changed(self) -> None:
         self.vars["mode"].set(self.mode_by_label.get(self.mode_label.get(), "rgb_dataset"))
@@ -439,6 +549,7 @@ class LauncherApp:
             if self.vars["config_path"].get() in STANDARD_CONFIGS:
                 self.vars["config_path"].set(str(ROOT / "config_dual_rgb.yaml"))
             self.vars["output_root"].set(str(ROOT / "captures"))
+        self.update_preset_choices(force_default=True)
 
         for row in self.field_rows.values():
             row.grid_remove()
@@ -457,6 +568,7 @@ class LauncherApp:
         self.vars["task"].set(CAMERA_TASKS.get(camera, "precise"))
         if str(self.vars["serial"].get()).strip() in KNOWN_CAMERA_SERIALS:
             self.vars["serial"].set("")
+        self.update_preset_choices(force_default=True)
 
     def clear_known_serial(self) -> None:
         if str(self.vars["serial"].get()).strip() in KNOWN_CAMERA_SERIALS:
@@ -514,6 +626,9 @@ class LauncherApp:
             if formats:
                 cmd.append("--formats")
                 cmd.extend(formats)
+            preset = str(self.vars["device_preset"].get()).strip()
+            if preset:
+                cmd.extend(["--preset", preset])
             if bool(self.vars["start_auto"].get()):
                 cmd.append("--start-auto")
             if bool(self.vars["no_preview"].get()):
@@ -547,6 +662,9 @@ class LauncherApp:
             if formats:
                 cmd.append("--formats")
                 cmd.extend(formats)
+            preset = str(self.vars["device_preset"].get()).strip()
+            if preset:
+                cmd.extend(["--preset", preset])
             if bool(self.vars["start_auto"].get()):
                 cmd.append("--auto")
             if bool(self.vars["no_preview"].get()):
@@ -564,6 +682,9 @@ class LauncherApp:
                 cmd.extend(["--output-root", output_root])
             if tag:
                 cmd.extend(["--tag", tag])
+            preset = str(self.vars["device_preset"].get()).strip()
+            if preset:
+                cmd.extend(["--preset", preset])
             return cmd
 
         if mode in ("rgbd_335l", "dual_rgb_305"):
@@ -579,6 +700,9 @@ class LauncherApp:
             tag = str(self.vars["tag"].get()).strip()
             if tag:
                 cmd.extend(["--tag", tag])
+            preset = str(self.vars["device_preset"].get()).strip()
+            if preset:
+                cmd.extend(["--preset", preset])
             return cmd
 
         if mode == "merged_dual":
