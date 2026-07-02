@@ -66,6 +66,13 @@ the script prints the available profiles so the resolution can be adjusted.
 This mode opens RGB and depth preview panels by default. The overlay shows live
 FPS while saving; sustained 30 FPS still depends on the exposed SDK profile,
 USB bandwidth, CPU load, and disk write speed.
+The merged preview is decoupled from saving: the window refreshes at a capped
+preview FPS, RGB preview uses the latest frames, and depth pseudo-color preview
+is generated less frequently to reduce CPU load.
+Saving is software-gated across both cameras: one 335L sample and one 305 sample
+are saved together, so the two camera folders keep the same image count. This is
+count synchronization, not hardware timestamp synchronization. D2C alignment is
+disabled by default in the provided RGB-D configs (`pipeline.align_mode: "DISABLE"`).
 
 ## Notes
 

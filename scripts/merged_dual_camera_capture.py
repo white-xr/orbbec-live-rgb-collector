@@ -51,8 +51,10 @@ ROLE_TITLES = {
 
 # 启动并打开两台相机后，等待多少秒自动开始保存。0 表示手动按 S/空格/按钮。
 AUTO_START_DELAY_SECONDS = 0.0
-# 合并窗口只负责预览，降低刷新可以保护保存帧率。
-PREVIEW_TARGET_FPS = 10.0
+# 合并窗口只负责预览，刷新率独立于保存帧率。
+PREVIEW_TARGET_FPS = 15.0
+# 同步保存线程轮询两台相机最新帧的间隔；快相机多出来的帧会被最新帧覆盖。
+SYNC_SAVE_POLL_SECONDS = 0.002
 # 合并窗口中的 depth 伪彩色预览；RGB-D + RGB-D 模式会默认打开。
 SHOW_DEPTH_PREVIEW = False
 
@@ -72,6 +74,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--width", type=int, default=0, help="Override color/depth width for both cameras")
     parser.add_argument("--height", type=int, default=0, help="Override color/depth height for both cameras")
     parser.add_argument("--fps", type=int, default=0, help="Override color/depth FPS for both cameras")
+    parser.add_argument("--preset-335l", default="", help="Override 335L device preset")
+    parser.add_argument("--preset-305", default="", help="Override 305 device preset")
+    parser.add_argument("--preview-fps", type=float, default=15.0, help="Merged window refresh FPS")
+    parser.add_argument("--preview-every-n", type=int, default=1, help="Update RGB preview every N camera frames")
+    parser.add_argument("--depth-preview-every-n", type=int, default=5, help="Update depth pseudo-color preview every N camera frames")
     parser.add_argument(
         "--show-depth-preview",
         action="store_true",
@@ -101,6 +108,16 @@ def apply_runtime_overrides(settings: dict[str, Any], args: argparse.Namespace) 
             profile["height"] = height
         if fps > 0:
             profile["fps"] = fps
+
+
+def apply_preset_override(settings: dict[str, Any], preset_name: str) -> None:
+    preset = str(preset_name or "").strip()
+    if not preset:
+        return
+    preset_cfg = settings.setdefault("device_preset", {})
+    preset_cfg["enabled"] = True
+    preset_cfg["name"] = preset
+    preset_cfg["required"] = True
 
 
 def resize_panel(img: np.ndarray | None, width: int, height: int, label: str) -> np.ndarray:
@@ -238,6 +255,10 @@ def setup_camera(
 ) -> dict[str, Any]:
     settings = cap.load_capture_config(config_path)
     apply_runtime_overrides(settings, args)
+    if model_hint == MODEL_305:
+        apply_preset_override(settings, str(args.preset_305 or ""))
+    elif model_hint == MODEL_335L:
+        apply_preset_override(settings, str(args.preset_335l or ""))
     device_cfg = settings.setdefault("device", {})
     device_cfg.setdefault("model_hint", model_hint)
     output_cfg = settings.get("output", {}) or {}
@@ -326,7 +347,12 @@ def setup_camera(
         "depth_vis": None,
         "left": None,
         "right": None,
-        "preview_every_n": max(1, int((settings.get("preview", {}) or {}).get("preview_every_n_frames", 1) or 1)),
+        "sync_lock": threading.Lock(),
+        "latest_payload": None,
+        "latest_payload_id": 0,
+        "latest_saved_payload_id": 0,
+        "preview_every_n": max(1, int(args.preview_every_n or 1)),
+        "depth_preview_every_n": max(1, int(args.depth_preview_every_n or 5)),
         "preview_count": 0,
     }
 
@@ -339,6 +365,127 @@ def update_fps(state: dict[str, Any]) -> None:
         state["fps"] = state["fps_count"] / dt
         state["fps_count"] = 0
         state["fps_t0"] = now
+
+
+def reset_sync_payloads(states: list[dict[str, Any]]) -> None:
+    for state in states:
+        with state["sync_lock"]:
+            state["latest_payload"] = None
+            state["latest_payload_id"] = 0
+            state["latest_saved_payload_id"] = 0
+
+
+def set_latest_payload(state: dict[str, Any], payload: dict[str, Any]) -> None:
+    with state["sync_lock"]:
+        payload_id = int(state["latest_payload_id"]) + 1
+        payload["payload_id"] = payload_id
+        state["latest_payload"] = payload
+        state["latest_payload_id"] = payload_id
+
+
+def get_unsaved_payload(state: dict[str, Any]) -> tuple[int, dict[str, Any]] | None:
+    with state["sync_lock"]:
+        payload = state.get("latest_payload")
+        payload_id = int(state.get("latest_payload_id", 0) or 0)
+        saved_payload_id = int(state.get("latest_saved_payload_id", 0) or 0)
+        if payload is None or payload_id <= saved_payload_id:
+            return None
+        return payload_id, payload
+
+
+def mark_payload_saved(state: dict[str, Any], payload_id: int) -> None:
+    with state["sync_lock"]:
+        state["latest_saved_payload_id"] = max(int(state.get("latest_saved_payload_id", 0) or 0), int(payload_id))
+
+
+def make_save_payload(
+    streams: dict[str, Any],
+    color_fd,
+    color_img: np.ndarray | None,
+    color_left_fd,
+    left_img: np.ndarray | None,
+    color_right_fd,
+    right_img: np.ndarray | None,
+    depth_fd,
+    depth_raw: np.ndarray | None,
+) -> dict[str, Any] | None:
+    if streams.get("color_left", False) and streams.get("color_right", False) and not streams.get("depth", False):
+        if color_left_fd and color_right_fd and left_img is not None and right_img is not None:
+            return {
+                "kind": "dual_rgb",
+                "left_fd": color_left_fd,
+                "left_img": left_img,
+                "right_fd": color_right_fd,
+                "right_img": right_img,
+            }
+        return None
+
+    if streams.get("color", False) and streams.get("depth", False):
+        if color_fd and depth_fd and color_img is not None and depth_raw is not None:
+            return {
+                "kind": "rgbd",
+                "color_fd": color_fd,
+                "color_img": color_img,
+                "depth_fd": depth_fd,
+                "depth_raw": depth_raw,
+            }
+        return None
+
+    return None
+
+
+def save_payload(writer: cap.SessionWriter, payload: dict[str, Any]) -> None:
+    kind = str(payload.get("kind", ""))
+    if kind == "dual_rgb":
+        writer.save_dual_color_pair(
+            payload["left_fd"],
+            payload["left_img"],
+            payload["right_fd"],
+            payload["right_img"],
+        )
+    elif kind == "rgbd":
+        writer.save_pair(
+            payload["color_fd"],
+            payload["color_img"],
+            payload["depth_fd"],
+            payload["depth_raw"],
+        )
+    else:
+        writer.mark_skip("format", f"unknown payload kind: {kind}")
+
+
+def sync_save_worker(states: list[dict[str, Any]], capture_event: threading.Event, stop_event: threading.Event) -> None:
+    """Save one sample per camera only after every camera has a fresh payload."""
+    while not stop_event.is_set():
+        if not capture_event.is_set():
+            time.sleep(0.01)
+            continue
+
+        ready: list[tuple[dict[str, Any], int, dict[str, Any]]] = []
+        for state in states:
+            item = get_unsaved_payload(state)
+            if item is None:
+                break
+            payload_id, payload = item
+            ready.append((state, payload_id, payload))
+
+        if len(ready) != len(states):
+            time.sleep(SYNC_SAVE_POLL_SECONDS)
+            continue
+
+        try:
+            for state, _payload_id, payload in ready:
+                writer: cap.SessionWriter = state["writer"]
+                if writer.active:
+                    save_payload(writer, payload)
+            for state, payload_id, _payload in ready:
+                mark_payload_saved(state, payload_id)
+        except Exception as ex:
+            for state, _payload_id, _payload in ready:
+                state["error"] = str(ex)
+            print(f"[{cap.now_str()}] WARN synchronized saver stopped: {ex}")
+            stop_event.set()
+            break
 
 
 def poll_camera(sdk: cap.SDK, state: dict[str, Any], capturing: bool) -> None:
@@ -386,8 +533,10 @@ def poll_camera(sdk: cap.SDK, state: dict[str, Any], capturing: bool) -> None:
         state["preview_count"] = int(state.get("preview_count", 0)) + 1
 
     preview_every_n = max(1, int(state.get("preview_every_n", 1) or 1))
+    depth_preview_every_n = max(1, int(state.get("depth_preview_every_n", 5) or 5))
     preview_count = int(state.get("preview_count", 0))
     preview_now = preview_count <= 1 or preview_count % preview_every_n == 0
+    depth_preview_now = preview_count <= 1 or preview_count % depth_preview_every_n == 0
     if preview_now:
         if color_img is not None:
             state["color"] = color_img
@@ -395,23 +544,26 @@ def poll_camera(sdk: cap.SDK, state: dict[str, Any], capturing: bool) -> None:
             state["left"] = left_img
         if right_img is not None:
             state["right"] = right_img
-        if depth_raw is not None and SHOW_DEPTH_PREVIEW:
-            state["depth_vis"] = cap.depth_to_vis(depth_raw)
+    if depth_raw is not None and SHOW_DEPTH_PREVIEW and depth_preview_now:
+        state["depth_vis"] = cap.depth_to_vis(depth_raw)
     if not capturing or not writer.active:
         return
 
-    if streams.get("color_left", False) and streams.get("color_right", False) and not streams.get("depth", False):
-        if color_left_fd and color_right_fd and left_img is not None and right_img is not None:
-            writer.save_dual_color_pair(color_left_fd, left_img, color_right_fd, right_img)
-        else:
-            writer.mark_skip("missing_or_decode")
-        return
-
-    if streams.get("color", False) and streams.get("depth", False):
-        if color_fd and depth_fd and color_img is not None and depth_raw is not None:
-            writer.save_pair(color_fd, color_img, depth_fd, depth_raw)
-        else:
-            writer.mark_skip("missing_or_decode")
+    payload = make_save_payload(
+        streams,
+        color_fd,
+        color_img,
+        color_left_fd,
+        left_img,
+        color_right_fd,
+        right_img,
+        depth_fd,
+        depth_raw,
+    )
+    if payload is not None:
+        set_latest_payload(state, payload)
+    else:
+        writer.mark_skip("missing")
 
 
 def camera_worker(sdk: cap.SDK, state: dict[str, Any], capture_event: threading.Event, stop_event: threading.Event) -> None:
@@ -426,8 +578,9 @@ def camera_worker(sdk: cap.SDK, state: dict[str, Any], capture_event: threading.
 
 
 def main() -> int:
-    global SHOW_DEPTH_PREVIEW
+    global PREVIEW_TARGET_FPS, SHOW_DEPTH_PREVIEW
     args = parse_args()
+    PREVIEW_TARGET_FPS = max(1.0, float(args.preview_fps or 15.0))
     cap.PNG_COMPRESSION = 0
     sdk = cap.SDK(Path(args.sdk_bin))
     ctx = dl = 0
@@ -436,6 +589,7 @@ def main() -> int:
     capture_event = threading.Event()
     stop_event = threading.Event()
     worker_threads: list[threading.Thread] = []
+    sync_thread: threading.Thread | None = None
     try:
         mode = str(args.capture_mode)
         SHOW_DEPTH_PREVIEW = bool(args.show_depth_preview or mode == MODE_RGBD_RGBD)
@@ -457,6 +611,13 @@ def main() -> int:
             thread = threading.Thread(target=camera_worker, args=(sdk, state, capture_event, stop_event), daemon=True, name=f"CameraWorker-{state['role']}")
             thread.start()
             worker_threads.append(thread)
+        sync_thread = threading.Thread(
+            target=sync_save_worker,
+            args=(states, capture_event, stop_event),
+            daemon=True,
+            name="SynchronizedSaveWorker",
+        )
+        sync_thread.start()
 
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
         cv2.resizeWindow(window_name, 1280, 850)
@@ -495,6 +656,7 @@ def main() -> int:
                 shared_dir.mkdir(parents=True, exist_ok=True)
                 write_shared_manifest(shared_dir, states)
                 print(f"[{cap.now_str()}] Shared session started: {shared_dir}")
+                reset_sync_payloads(states)
                 for state in states:
                     writer: cap.SessionWriter = state["writer"]
                     role_folder = ROLE_FOLDERS.get(state["role"], state["role"])
@@ -534,6 +696,11 @@ def main() -> int:
         for thread in worker_threads:
             try:
                 thread.join(timeout=1.0)
+            except Exception:
+                pass
+        if sync_thread is not None:
+            try:
+                sync_thread.join(timeout=1.0)
             except Exception:
                 pass
         for state in states:

@@ -108,6 +108,7 @@ MODE_FIELDS = {
         "width",
         "height",
         "fps",
+        "device_preset",
         "sdk_bin",
         "output_root",
     ],
@@ -165,6 +166,7 @@ MODE_CAMERA_HINTS = {
     "rgbd_305": "305",
     "rgbd_335l": "335L",
     "dual_rgb_305": "305",
+    "merged_rgbd": "305",
 }
 MODE_DEFAULT_PRESETS = {
     "rgb_dataset": "Default",
@@ -172,6 +174,7 @@ MODE_DEFAULT_PRESETS = {
     "rgbd_305": "Default",
     "rgbd_335l": "Default",
     "dual_rgb_305": DUAL_COLOR_PRESET,
+    "merged_rgbd": "Default",
 }
 
 DEFAULTS = {
@@ -702,7 +705,6 @@ class LauncherApp:
                 str(self.vars["height"].get()).strip(),
                 "--fps",
                 str(self.vars["fps"].get()).strip(),
-                "--show-depth-preview",
             ]
             output_root = str(self.vars["output_root"].get()).strip()
             if output_root:
@@ -782,7 +784,17 @@ class LauncherApp:
                 str(self.vars["height"].get()).strip(),
                 "--fps",
                 str(self.vars["fps"].get()).strip(),
+                "--show-depth-preview",
+                "--preview-fps",
+                "15",
+                "--preview-every-n",
+                "1",
+                "--depth-preview-every-n",
+                "5",
             ]
+            preset = str(self.vars["device_preset"].get()).strip()
+            if preset:
+                cmd.extend(["--preset-305", preset])
             self.add_common_capture_args(cmd)
             return cmd
 
