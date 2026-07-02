@@ -3,9 +3,9 @@
 """
 Single-window dual Orbbec capture.
 
-One process opens:
-- Gemini 335L: RGB-D, config/config.yaml, selected by model name by default
-- Gemini 305 : Dual RGB, config/config_dual_rgb.yaml, selected by model name by default
+One process opens either:
+- Gemini 335L RGB-D + Gemini 305 Dual RGB
+- Gemini 335L RGB-D + Gemini 305 RGB-D
 
 Keys:
 - S: start saving both cameras
@@ -15,6 +15,7 @@ Keys:
 
 from __future__ import annotations
 
+import argparse
 import threading
 import time
 from pathlib import Path
@@ -31,13 +32,21 @@ PROJECT_ROOT = ROOT.parent
 CONFIG_DIR = PROJECT_ROOT / "config"
 CONFIG_335L_RGBD = CONFIG_DIR / "config.yaml"
 CONFIG_305_DUAL_RGB = CONFIG_DIR / "config_dual_rgb.yaml"
+CONFIG_305_RGBD = CONFIG_DIR / "config_305_rgbd.yaml"
 MODEL_335L = "335L"
 MODEL_305 = "305"
-WINDOW_NAME = "Orbbec 335L RGB-D + 305 Dual RGB"
+MODE_RGBD_DUAL_RGB = "rgbd-dual-rgb"
+MODE_RGBD_RGBD = "rgbd-rgbd"
 CONTROL_BUTTON_RECT = (24, 724, 220, 790)
 ROLE_FOLDERS = {
     "335L_rgbd": "eye_to_hand_335L",
     "305_dual_rgb": "eye_in_hand_305",
+    "305_rgbd": "eye_in_hand_305",
+}
+ROLE_TITLES = {
+    "335L_rgbd": "335L RGB-D",
+    "305_dual_rgb": "305 Dual RGB",
+    "305_rgbd": "305 RGB-D",
 }
 
 # 启动并打开两台相机后，等待多少秒自动开始保存。0 表示手动按 S/空格/按钮。
@@ -46,6 +55,48 @@ AUTO_START_DELAY_SECONDS = 0.0
 PREVIEW_TARGET_FPS = 10.0
 # 关闭合并窗口中的 depth 伪彩色预览，depth_raw 仍然正常保存。
 SHOW_DEPTH_PREVIEW = False
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Single-window dual Orbbec capture.")
+    parser.add_argument(
+        "--capture-mode",
+        choices=[MODE_RGBD_DUAL_RGB, MODE_RGBD_RGBD],
+        default=MODE_RGBD_DUAL_RGB,
+        help="Dual capture mode.",
+    )
+    parser.add_argument("--sdk-bin", default=r"D:\OrbbecSDK_v2\bin", help="Folder containing OrbbecSDK.dll")
+    parser.add_argument("--config-335l", default=str(CONFIG_335L_RGBD), help="335L RGB-D config YAML")
+    parser.add_argument("--config-305", default="", help="305 config YAML; default depends on --capture-mode")
+    parser.add_argument("--output-root", default="", help="Override capture output root for both cameras")
+    parser.add_argument("--width", type=int, default=0, help="Override color/depth width for both cameras")
+    parser.add_argument("--height", type=int, default=0, help="Override color/depth height for both cameras")
+    parser.add_argument("--fps", type=int, default=0, help="Override color/depth FPS for both cameras")
+    parser.add_argument("--show-depth-preview", action="store_true", help="Show depth pseudo-color panels")
+    return parser.parse_args()
+
+
+def apply_runtime_overrides(settings: dict[str, Any], args: argparse.Namespace) -> None:
+    output_root = str(args.output_root or "").strip()
+    if output_root:
+        settings["output_root"] = output_root
+        settings.setdefault("output", {})["base_dir"] = output_root
+
+    width = int(args.width or 0)
+    height = int(args.height or 0)
+    fps = int(args.fps or 0)
+    if width <= 0 and height <= 0 and fps <= 0:
+        return
+
+    stream_profile = settings.setdefault("stream_profile", {})
+    for key in ("color", "depth", "dual_color"):
+        profile = stream_profile.setdefault(key, {})
+        if width > 0:
+            profile["width"] = width
+        if height > 0:
+            profile["height"] = height
+        if fps > 0:
+            profile["fps"] = fps
 
 
 def resize_panel(img: np.ndarray | None, width: int, height: int, label: str) -> np.ndarray:
@@ -65,20 +116,32 @@ def resize_panel(img: np.ndarray | None, width: int, height: int, label: str) ->
     return canvas
 
 
+def state_preview_panels(state: dict[str, Any], panel_w: int, panel_h: int) -> tuple[np.ndarray, np.ndarray]:
+    role_title = ROLE_TITLES.get(str(state.get("role", "")), str(state.get("role", "")))
+    streams = state.get("streams", {}) or {}
+    if streams.get("color_left", False) and streams.get("color_right", False) and not streams.get("depth", False):
+        left = resize_panel(state.get("left"), panel_w, panel_h, f"{role_title} Left RGB")
+        right = resize_panel(state.get("right"), panel_w, panel_h, f"{role_title} Right RGB")
+        return left, right
+
+    color = resize_panel(state.get("color"), panel_w, panel_h, f"{role_title} RGB")
+    depth_label = f"{role_title} Depth" if SHOW_DEPTH_PREVIEW else f"{role_title} Depth preview off"
+    depth = resize_panel(state.get("depth_vis") if SHOW_DEPTH_PREVIEW else None, panel_w, panel_h, depth_label)
+    return color, depth
+
+
 def make_merged_preview(state_335: dict[str, Any], state_305: dict[str, Any], capturing: bool) -> np.ndarray:
     panel_w = 640
     panel_h = 400
-    p1 = resize_panel(state_335.get("color"), panel_w, panel_h, "335L RGB")
-    p2 = resize_panel(state_335.get("depth_vis") if SHOW_DEPTH_PREVIEW else None, panel_w, panel_h, "335L Depth disabled")
-    p3 = resize_panel(state_305.get("left"), panel_w, panel_h, "305 Left RGB")
-    p4 = resize_panel(state_305.get("right"), panel_w, panel_h, "305 Right RGB")
+    p1, p2 = state_preview_panels(state_335, panel_w, panel_h)
+    p3, p4 = state_preview_panels(state_305, panel_w, panel_h)
     top = np.hstack([p1, p2])
     bottom = np.hstack([p3, p4])
     preview = np.vstack([top, bottom])
 
     sections = [
         (
-            "335L RGB-D",
+            ROLE_TITLES.get(str(state_335.get("role", "")), "335L"),
             [
                 f"SN: {state_335.get('sn', '--')}",
                 f"FPS: {state_335.get('fps', 0.0):.1f}",
@@ -86,7 +149,7 @@ def make_merged_preview(state_335: dict[str, Any], state_305: dict[str, Any], ca
             ],
         ),
         (
-            "305 Dual RGB",
+            ROLE_TITLES.get(str(state_305.get("role", "")), "305"),
             [
                 f"SN: {state_305.get('sn', '--')}",
                 f"FPS: {state_305.get('fps', 0.0):.1f}",
@@ -167,8 +230,10 @@ def setup_camera(
     config_path: Path,
     model_hint: str,
     role: str,
+    args: argparse.Namespace,
 ) -> dict[str, Any]:
     settings = cap.load_capture_config(config_path)
+    apply_runtime_overrides(settings, args)
     device_cfg = settings.setdefault("device", {})
     device_cfg.setdefault("model_hint", model_hint)
     output_cfg = settings.get("output", {}) or {}
@@ -354,9 +419,14 @@ def camera_worker(sdk: cap.SDK, state: dict[str, Any], capture_event: threading.
             state["error"] = str(ex)
             print(f"[{cap.now_str()}] WARN {state.get('role', '')} worker stopped: {ex}")
             break
+
+
 def main() -> int:
+    global SHOW_DEPTH_PREVIEW
+    args = parse_args()
+    SHOW_DEPTH_PREVIEW = bool(args.show_depth_preview)
     cap.PNG_COMPRESSION = 0
-    sdk = cap.SDK(Path(r"D:\OrbbecSDK_v2\bin"))
+    sdk = cap.SDK(Path(args.sdk_bin))
     ctx = dl = 0
     states: list[dict[str, Any]] = []
     capturing = False
@@ -364,20 +434,30 @@ def main() -> int:
     stop_event = threading.Event()
     worker_threads: list[threading.Thread] = []
     try:
+        mode = str(args.capture_mode)
+        config_335l = Path(args.config_335l)
+        if args.config_305:
+            config_305 = Path(args.config_305)
+        else:
+            config_305 = CONFIG_305_RGBD if mode == MODE_RGBD_RGBD else CONFIG_305_DUAL_RGB
+        role_305 = "305_rgbd" if mode == MODE_RGBD_RGBD else "305_dual_rgb"
+        window_name = "Orbbec 335L RGB-D + 305 RGB-D" if mode == MODE_RGBD_RGBD else "Orbbec 335L RGB-D + 305 Dual RGB"
+
         print(f"[{cap.now_str()}] Orbbec SDK version: {sdk.get_sdk_version_text()}")
+        print(f"[{cap.now_str()}] Capture mode: {mode}")
         ctx = sdk.create_context()
         dl = sdk.query_device_list(ctx)
-        states.append(setup_camera(sdk, dl, CONFIG_335L_RGBD, MODEL_335L, "335L_rgbd"))
-        states.append(setup_camera(sdk, dl, CONFIG_305_DUAL_RGB, MODEL_305, "305_dual_rgb"))
+        states.append(setup_camera(sdk, dl, config_335l, MODEL_335L, "335L_rgbd", args))
+        states.append(setup_camera(sdk, dl, config_305, MODEL_305, role_305, args))
         for state in states:
             thread = threading.Thread(target=camera_worker, args=(sdk, state, capture_event, stop_event), daemon=True, name=f"CameraWorker-{state['role']}")
             thread.start()
             worker_threads.append(thread)
 
-        cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(WINDOW_NAME, 1280, 850)
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(window_name, 1280, 850)
         mouse_state = {"toggle": False}
-        cv2.setMouseCallback(WINDOW_NAME, on_mouse, mouse_state)
+        cv2.setMouseCallback(window_name, on_mouse, mouse_state)
 
         print("Keys: S=start both | E=stop both | Q/ESC=quit")
         auto_start_at = time.perf_counter() + float(AUTO_START_DELAY_SECONDS) if AUTO_START_DELAY_SECONDS > 0 else None
@@ -393,7 +473,7 @@ def main() -> int:
 
             preview = make_merged_preview(states[0], states[1], capturing)
             preview = draw_capture_button(preview, capturing)
-            cv2.imshow(WINDOW_NAME, preview)
+            cv2.imshow(window_name, preview)
             key = cv2.waitKey(1) & 0xFF
             mouse_toggle = bool(mouse_state.get("toggle"))
             mouse_state["toggle"] = False

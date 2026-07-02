@@ -46,6 +46,7 @@ MODE_LABELS = {
     "rgbd_335l": "335L RGB-D 采集",
     "dual_rgb_305": "305 双 RGB 采集",
     "merged_dual": "335L + 305 联合采集（单窗口）",
+    "merged_rgbd": "335L + 305 RGB-D 联合采集",
 }
 
 MODE_DESCRIPTIONS = {
@@ -55,6 +56,7 @@ MODE_DESCRIPTIONS = {
     "rgbd_335l": "使用 config/config.yaml 启动普通 RGB-D 采集，保存 color/depth 等配置内启用的数据。",
     "dual_rgb_305": "使用 config/config_dual_rgb.yaml 切到 Dual Color Streams，保存 305 左右双 RGB。",
     "merged_dual": "推荐日常使用：一个窗口同时预览两台相机，按空格/S/E 控制一起保存。",
+    "merged_rgbd": "335L 和 305 同时启动 RGB-D，默认按 1280x800@30 请求 color/depth。",
 }
 
 MODE_FIELDS = {
@@ -102,6 +104,13 @@ MODE_FIELDS = {
         "device_preset",
     ],
     "merged_dual": [],
+    "merged_rgbd": [
+        "width",
+        "height",
+        "fps",
+        "sdk_bin",
+        "output_root",
+    ],
 }
 
 CAMERA_TASKS = {"335L": "coarse", "305": "precise"}
@@ -591,6 +600,12 @@ class LauncherApp:
             if is_standard_config_path(self.vars["config_path"].get()):
                 self.vars["config_path"].set(str(CONFIG_DIR / "config_dual_rgb.yaml"))
             self.vars["output_root"].set(str(ROOT / "captures"))
+        elif mode == "merged_rgbd":
+            self.clear_known_serial()
+            self.vars["width"].set("1280")
+            self.vars["height"].set("800")
+            self.vars["fps"].set("30")
+            self.vars["output_root"].set(str(ROOT / "captures"))
         self.update_preset_choices(force_default=True)
 
         for row in self.field_rows.values():
@@ -750,6 +765,26 @@ class LauncherApp:
         if mode == "merged_dual":
             return [sys.executable, str(SCRIPTS["merged_dual"])]
 
+        if mode == "merged_rgbd":
+            cmd = [
+                sys.executable,
+                str(SCRIPTS["merged_dual"]),
+                "--capture-mode",
+                "rgbd-rgbd",
+                "--config-335l",
+                str(CONFIG_DIR / "config.yaml"),
+                "--config-305",
+                str(CONFIG_DIR / "config_305_rgbd.yaml"),
+                "--width",
+                str(self.vars["width"].get()).strip(),
+                "--height",
+                str(self.vars["height"].get()).strip(),
+                "--fps",
+                str(self.vars["fps"].get()).strip(),
+            ]
+            self.add_common_capture_args(cmd)
+            return cmd
+
         raise RuntimeError(f"unknown mode: {mode}")
 
     def update_command_preview(self) -> None:
@@ -768,6 +803,7 @@ class LauncherApp:
         numeric_fields = {
             "rgb_dataset": ["width", "height", "fps", "auto_interval", "png_compression"],
             "rgb_interval_305": ["width", "height", "fps", "save_every_seconds", "save_every_frames", "max_saves"],
+            "merged_rgbd": ["width", "height", "fps"],
         }.get(mode, [])
         for key in numeric_fields:
             value = str(self.vars[key].get()).strip()

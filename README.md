@@ -53,6 +53,17 @@ Optional serial behavior:
 - `--serial any`: use the first Orbbec device
 - explicit serial: use the matching device only
 
+## 335L + 305 RGB-D Joint Capture
+
+Use the GUI mode `335L + 305 RGB-D 联合采集`, or run:
+
+```powershell
+python scripts\merged_dual_camera_capture.py --capture-mode rgbd-rgbd --width 1280 --height 800 --fps 30
+```
+
+If the 305 is enumerated as USB2.x, 1280x800@30 may not be exposed by the SDK;
+the script prints the available profiles so the resolution can be adjusted.
+
 ## Notes
 
 - The scripts expect Orbbec SDK v2 binaries under `D:\OrbbecSDK_v2\bin` by default.
