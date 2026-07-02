@@ -702,6 +702,7 @@ class LauncherApp:
                 str(self.vars["height"].get()).strip(),
                 "--fps",
                 str(self.vars["fps"].get()).strip(),
+                "--show-depth-preview",
             ]
             output_root = str(self.vars["output_root"].get()).strip()
             if output_root:

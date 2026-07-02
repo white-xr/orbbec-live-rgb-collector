@@ -53,7 +53,7 @@ ROLE_TITLES = {
 AUTO_START_DELAY_SECONDS = 0.0
 # 合并窗口只负责预览，降低刷新可以保护保存帧率。
 PREVIEW_TARGET_FPS = 10.0
-# 关闭合并窗口中的 depth 伪彩色预览，depth_raw 仍然正常保存。
+# 合并窗口中的 depth 伪彩色预览；RGB-D + RGB-D 模式会默认打开。
 SHOW_DEPTH_PREVIEW = False
 
 
@@ -72,7 +72,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--width", type=int, default=0, help="Override color/depth width for both cameras")
     parser.add_argument("--height", type=int, default=0, help="Override color/depth height for both cameras")
     parser.add_argument("--fps", type=int, default=0, help="Override color/depth FPS for both cameras")
-    parser.add_argument("--show-depth-preview", action="store_true", help="Show depth pseudo-color panels")
+    parser.add_argument(
+        "--show-depth-preview",
+        action="store_true",
+        help="Force depth pseudo-color panels; RGB-D + RGB-D mode enables them by default",
+    )
     return parser.parse_args()
 
 
@@ -424,7 +428,6 @@ def camera_worker(sdk: cap.SDK, state: dict[str, Any], capture_event: threading.
 def main() -> int:
     global SHOW_DEPTH_PREVIEW
     args = parse_args()
-    SHOW_DEPTH_PREVIEW = bool(args.show_depth_preview)
     cap.PNG_COMPRESSION = 0
     sdk = cap.SDK(Path(args.sdk_bin))
     ctx = dl = 0
@@ -435,6 +438,7 @@ def main() -> int:
     worker_threads: list[threading.Thread] = []
     try:
         mode = str(args.capture_mode)
+        SHOW_DEPTH_PREVIEW = bool(args.show_depth_preview or mode == MODE_RGBD_RGBD)
         config_335l = Path(args.config_335l)
         if args.config_305:
             config_305 = Path(args.config_305)

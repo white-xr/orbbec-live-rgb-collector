@@ -63,6 +63,9 @@ python scripts\merged_dual_camera_capture.py --capture-mode rgbd-rgbd --width 12
 
 If the 305 is enumerated as USB2.x, 1280x800@30 may not be exposed by the SDK;
 the script prints the available profiles so the resolution can be adjusted.
+This mode opens RGB and depth preview panels by default. The overlay shows live
+FPS while saving; sustained 30 FPS still depends on the exposed SDK profile,
+USB bandwidth, CPU load, and disk write speed.
 
 ## Notes
 
