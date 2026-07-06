@@ -16,6 +16,7 @@ Keys:
 from __future__ import annotations
 
 import argparse
+import re
 import threading
 import time
 from pathlib import Path
@@ -71,9 +72,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config-335l", default=str(CONFIG_335L_RGBD), help="335L RGB-D config YAML")
     parser.add_argument("--config-305", default="", help="305 config YAML; default depends on --capture-mode")
     parser.add_argument("--output-root", default="", help="Override capture output root for both cameras")
+    parser.add_argument("--tag", default="", help="Optional shared session folder name; duplicate names get _01 suffixes")
     parser.add_argument("--width", type=int, default=0, help="Override color/depth width for both cameras")
     parser.add_argument("--height", type=int, default=0, help="Override color/depth height for both cameras")
     parser.add_argument("--fps", type=int, default=0, help="Override color/depth FPS for both cameras")
+    parser.add_argument("--max-sync-diff-ms", type=float, default=50.0, help="Max cross-camera system timestamp delta for one saved sample; 0 disables this gate")
     parser.add_argument("--preset-335l", default="", help="Override 335L device preset")
     parser.add_argument("--preset-305", default="", help="Override 305 device preset")
     parser.add_argument("--preview-fps", type=float, default=15.0, help="Merged window refresh FPS")
@@ -214,9 +217,19 @@ def on_mouse(event: int, x: int, y: int, flags: int, param: dict[str, bool]) -> 
         param["toggle"] = True
 
 
-def make_shared_session_dir(root: Path) -> Path:
+def sanitize_session_name(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", text)
+    text = re.sub(r"\s+", "_", text)
+    return text.strip(" ._")
+
+
+def make_shared_session_dir(root: Path, tag: str = "") -> Path:
     root.mkdir(parents=True, exist_ok=True)
-    base = root / time.strftime("capture_%Y%m%d_%H%M%S")
+    base_name = sanitize_session_name(tag) or time.strftime("capture_%Y%m%d_%H%M%S")
+    base = root / base_name
     if not base.exists():
         return base
     idx = 1
@@ -417,6 +430,7 @@ def make_save_payload(
                 "left_img": left_img,
                 "right_fd": color_right_fd,
                 "right_img": right_img,
+                "sync_ts_us": int((int(color_left_fd.sys_ts) + int(color_right_fd.sys_ts)) // 2),
             }
         return None
 
@@ -428,6 +442,7 @@ def make_save_payload(
                 "color_img": color_img,
                 "depth_fd": depth_fd,
                 "depth_raw": depth_raw,
+                "sync_ts_us": int((int(color_fd.sys_ts) + int(depth_fd.sys_ts)) // 2),
             }
         return None
 
@@ -454,8 +469,14 @@ def save_payload(writer: cap.SessionWriter, payload: dict[str, Any]) -> None:
         writer.mark_skip("format", f"unknown payload kind: {kind}")
 
 
-def sync_save_worker(states: list[dict[str, Any]], capture_event: threading.Event, stop_event: threading.Event) -> None:
+def sync_save_worker(
+    states: list[dict[str, Any]],
+    capture_event: threading.Event,
+    stop_event: threading.Event,
+    max_sync_diff_ms: float,
+) -> None:
     """Save one sample per camera only after every camera has a fresh payload."""
+    max_sync_diff_us = int(max(0.0, float(max_sync_diff_ms or 0.0)) * 1000.0)
     while not stop_event.is_set():
         if not capture_event.is_set():
             time.sleep(0.01)
@@ -472,6 +493,25 @@ def sync_save_worker(states: list[dict[str, Any]], capture_event: threading.Even
         if len(ready) != len(states):
             time.sleep(SYNC_SAVE_POLL_SECONDS)
             continue
+
+        if max_sync_diff_us > 0:
+            sync_times = [
+                (state, payload_id, int(payload.get("sync_ts_us", 0) or 0))
+                for state, payload_id, payload in ready
+            ]
+            if all(ts > 0 for _state, _payload_id, ts in sync_times):
+                oldest_state, oldest_payload_id, oldest_ts = min(sync_times, key=lambda item: item[2])
+                newest_ts = max(ts for _state, _payload_id, ts in sync_times)
+                diff_us = newest_ts - oldest_ts
+                if diff_us > max_sync_diff_us:
+                    writer: cap.SessionWriter = oldest_state["writer"]
+                    if writer.active:
+                        writer.mark_skip(
+                            "sync",
+                            f"cross_camera_diff_ms={diff_us / 1000.0:.3f}, max_ms={float(max_sync_diff_ms):.3f}",
+                        )
+                    mark_payload_saved(oldest_state, oldest_payload_id)
+                    continue
 
         try:
             for state, _payload_id, payload in ready:
@@ -613,7 +653,7 @@ def main() -> int:
             worker_threads.append(thread)
         sync_thread = threading.Thread(
             target=sync_save_worker,
-            args=(states, capture_event, stop_event),
+            args=(states, capture_event, stop_event, float(args.max_sync_diff_ms)),
             daemon=True,
             name="SynchronizedSaveWorker",
         )
@@ -652,7 +692,7 @@ def main() -> int:
 
             if start_req and not capturing:
                 output_root = Path(states[0]["settings"].get("output_root", PROJECT_ROOT / "captures"))
-                shared_dir = make_shared_session_dir(output_root)
+                shared_dir = make_shared_session_dir(output_root, str(args.tag or ""))
                 shared_dir.mkdir(parents=True, exist_ok=True)
                 write_shared_manifest(shared_dir, states)
                 print(f"[{cap.now_str()}] Shared session started: {shared_dir}")

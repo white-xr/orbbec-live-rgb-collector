@@ -78,6 +78,20 @@ are saved together, so the two camera folders keep the same image count. This is
 count synchronization, not hardware timestamp synchronization. D2C alignment is
 disabled by default in the provided RGB-D configs (`pipeline.align_mode: "DISABLE"`).
 
+## 335L RGB-D + 305 Dual RGB Joint Capture
+
+Use the GUI mode `335L + 305 联合采集（单窗口）`, or run:
+
+```powershell
+python scripts\merged_dual_camera_capture.py --capture-mode rgbd-dual-rgb --width 1280 --height 800 --fps 30 --tag my_session
+```
+
+The outer session folder can be named with `--tag`; duplicate names receive a
+numeric suffix. The merged saver only writes a sample after both cameras have a
+fresh payload, so the 335L RGB-D folder and 305 dual-RGB folder keep the same
+sample count. `--max-sync-diff-ms` gates cross-camera system timestamp delta;
+use `0` to disable this software time gate.
+
 ## Notes
 
 - The scripts expect Orbbec SDK v2 binaries under `D:\OrbbecSDK_v2\bin` by default.

@@ -109,13 +109,22 @@ MODE_FIELDS = {
         "preview_fps",
     ],
     "merged_dual": [
+        "width",
+        "height",
+        "fps",
         "preview_fps",
+        "sync_delta_ms",
+        "tag",
+        "sdk_bin",
+        "output_root",
     ],
     "merged_rgbd": [
         "width",
         "height",
         "fps",
         "preview_fps",
+        "sync_delta_ms",
+        "tag",
         "device_preset",
         "sdk_bin",
         "output_root",
@@ -193,6 +202,7 @@ DEFAULTS = {
     "height": "800",
     "fps": "30",
     "preview_fps": "",
+    "sync_delta_ms": "50",
     "auto_interval": "1.0",
     "save_every_seconds": "1.0",
     "save_every_frames": "0",
@@ -233,6 +243,7 @@ class LauncherApp:
             "height": StringVar(value=data.get("height", DEFAULTS["height"])),
             "fps": StringVar(value=data.get("fps", DEFAULTS["fps"])),
             "preview_fps": StringVar(value=data.get("preview_fps", DEFAULTS["preview_fps"])),
+            "sync_delta_ms": StringVar(value=data.get("sync_delta_ms", DEFAULTS["sync_delta_ms"])),
             "auto_interval": StringVar(value=data.get("auto_interval", DEFAULTS["auto_interval"])),
             "save_every_seconds": StringVar(value=data.get("save_every_seconds", DEFAULTS["save_every_seconds"])),
             "save_every_frames": StringVar(value=data.get("save_every_frames", DEFAULTS["save_every_frames"])),
@@ -334,6 +345,7 @@ class LauncherApp:
         self.add_entry_row("height", "高度")
         self.add_entry_row("fps", "FPS")
         self.add_entry_row("preview_fps", "预览帧率", "留空=脚本默认；只限制预览窗口")
+        self.add_entry_row("sync_delta_ms", "同步阈值(ms)", "跨相机时间差；留空=脚本默认")
         self.add_entry_row("auto_interval", "自动保存间隔(s)")
         self.add_entry_row("save_every_seconds", "间隔保存秒数")
         self.add_entry_row("save_every_frames", "间隔保存帧数", "0 表示不用帧间隔")
@@ -614,6 +626,12 @@ class LauncherApp:
             if is_standard_config_path(self.vars["config_path"].get()):
                 self.vars["config_path"].set(str(CONFIG_DIR / "config_dual_rgb.yaml"))
             self.vars["output_root"].set(str(ROOT / "captures"))
+        elif mode == "merged_dual":
+            self.clear_known_serial()
+            self.vars["width"].set("1280")
+            self.vars["height"].set("800")
+            self.vars["fps"].set("30")
+            self.vars["output_root"].set(str(ROOT / "captures"))
         elif mode == "merged_rgbd":
             self.clear_known_serial()
             self.vars["width"].set("1280")
@@ -670,6 +688,11 @@ class LauncherApp:
         preview_fps = str(self.vars["preview_fps"].get()).strip()
         if preview_fps:
             cmd.extend(["--preview-fps", preview_fps])
+
+    def add_optional_sync_delta(self, cmd: list[str]) -> None:
+        sync_delta_ms = str(self.vars["sync_delta_ms"].get()).strip()
+        if sync_delta_ms:
+            cmd.extend(["--max-sync-diff-ms", sync_delta_ms])
 
     def build_command(self) -> list[str]:
         mode = self.current_mode()
@@ -786,8 +809,32 @@ class LauncherApp:
             return cmd
 
         if mode == "merged_dual":
-            cmd = [sys.executable, str(SCRIPTS["merged_dual"])]
+            cmd = [
+                sys.executable,
+                str(SCRIPTS["merged_dual"]),
+                "--capture-mode",
+                "rgbd-dual-rgb",
+                "--config-335l",
+                str(CONFIG_DIR / "config.yaml"),
+                "--config-305",
+                str(CONFIG_DIR / "config_dual_rgb.yaml"),
+                "--width",
+                str(self.vars["width"].get()).strip(),
+                "--height",
+                str(self.vars["height"].get()).strip(),
+                "--fps",
+                str(self.vars["fps"].get()).strip(),
+                "--preview-every-n",
+                "1",
+                "--depth-preview-every-n",
+                "5",
+            ]
+            tag = str(self.vars["tag"].get()).strip()
+            if tag:
+                cmd.extend(["--tag", tag])
             self.add_optional_preview_fps(cmd)
+            self.add_optional_sync_delta(cmd)
+            self.add_common_capture_args(cmd)
             return cmd
 
         if mode == "merged_rgbd":
@@ -812,10 +859,14 @@ class LauncherApp:
                 "--depth-preview-every-n",
                 "5",
             ]
+            tag = str(self.vars["tag"].get()).strip()
+            if tag:
+                cmd.extend(["--tag", tag])
             preset = str(self.vars["device_preset"].get()).strip()
             if preset:
                 cmd.extend(["--preset-305", preset])
             self.add_optional_preview_fps(cmd)
+            self.add_optional_sync_delta(cmd)
             self.add_common_capture_args(cmd)
             return cmd
 
@@ -837,6 +888,7 @@ class LauncherApp:
         numeric_fields = {
             "rgb_dataset": ["width", "height", "fps", "auto_interval", "png_compression"],
             "rgb_interval_305": ["width", "height", "fps", "save_every_seconds", "save_every_frames", "max_saves"],
+            "merged_dual": ["width", "height", "fps"],
             "merged_rgbd": ["width", "height", "fps"],
         }.get(mode, [])
         for key in numeric_fields:
@@ -862,6 +914,17 @@ class LauncherApp:
                 return False
             if preview_fps_number <= 0:
                 messagebox.showerror("参数错误", "preview_fps 必须大于 0，或留空使用默认值")
+                return False
+
+        sync_delta_ms = str(self.vars["sync_delta_ms"].get()).strip()
+        if "sync_delta_ms" in MODE_FIELDS[mode] and sync_delta_ms:
+            try:
+                sync_delta_number = float(sync_delta_ms)
+            except ValueError:
+                messagebox.showerror("参数错误", f"sync_delta_ms 必须是数字或留空: {sync_delta_ms}")
+                return False
+            if sync_delta_number < 0:
+                messagebox.showerror("参数错误", "sync_delta_ms 不能小于 0；填 0 表示关闭跨相机时间差门控")
                 return False
 
         if "device_index" in MODE_FIELDS[mode] and str(self.vars["device_index"].get()).strip():
