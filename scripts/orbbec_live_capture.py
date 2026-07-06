@@ -3366,6 +3366,7 @@ def parse_args():
     p.add_argument('--serial', default='', help='Orbbec camera serial number to use when multiple cameras are connected')
     p.add_argument('--model-hint', default='', help='Select first device whose model name contains this text, e.g. 335L or 305')
     p.add_argument('--preset', default='', help='Override device preset name, e.g. Default or Dual Color Streams')
+    p.add_argument('--preview-fps', type=float, default=0.0, help='Preview window FPS cap; 0 keeps config/default refresh behavior')
     p.add_argument('--auto-start', action='store_true', help='Start saving automatically after camera pipeline is ready')
     p.add_argument('--auto-start-at', type=float, default=0.0, help='Unix timestamp seconds for scheduled auto start')
     p.add_argument('--stop-file', default='', help='Stop saving when this file exists, used by multi-camera controller')
@@ -3437,6 +3438,9 @@ def select_device(sdk: SDK, dl, serial: str, device_index: Optional[int], model_
 def main() -> int:
     global PNG_COMPRESSION
     args = parse_args()
+    if float(args.preview_fps) < 0:
+        print('[ERROR] --preview-fps must be >= 0')
+        return 1
     config_path = Path(args.config).expanduser()
     settings = load_capture_config(config_path)
     apply_config_defaults_to_args(args, settings)
@@ -3572,6 +3576,11 @@ def main() -> int:
         cv2.setMouseCallback(window_name, on_preview_mouse, ui_state)
         preview_every_n = max(1, int(preview_cfg.get('preview_every_n_frames', 1) or 1))
         preview_depth_every_n = max(1, int(preview_cfg.get('depth_vis_every_n_frames', 1) or 1))
+        preview_fps_cap = max(0.0, float(args.preview_fps or 0.0))
+        if preview_fps_cap > 0:
+            preview_every_n = 1
+        preview_interval = 1.0 / preview_fps_cap if preview_fps_cap > 0 else 0.0
+        next_preview_at = 0.0
         preview_frame_index = 0
 
         def start_capture():
@@ -3734,7 +3743,15 @@ def main() -> int:
                 else:
                     writer.save_pair(color_fd, color_img, depth_fd, depth_raw)
 
-            if preview_frame_index % preview_every_n == 0:
+            should_refresh_preview = preview_frame_index % preview_every_n == 0
+            if should_refresh_preview and preview_interval > 0:
+                preview_now = time.perf_counter()
+                if preview_now < next_preview_at:
+                    should_refresh_preview = False
+                else:
+                    next_preview_at = preview_now + preview_interval
+
+            if should_refresh_preview:
                 preview = make_preview(last_color, last_depth_vis, last_ir_left_vis, last_ir_right_vis, last_color_left, last_color_right)
                 dual_rgb_on = bool(save_color_left and save_color_right and not save_depth)
                 rgbd_on = bool(save_color and save_depth)
@@ -3785,6 +3802,7 @@ def main() -> int:
                             f'Status: {"RUNNING" if capturing else "IDLE"}',
                             f'Frame count: {preview_frame_index}',
                             f'Preview: every {preview_every_n} frame(s)',
+                            f'Preview FPS cap: {preview_fps_cap:g}' if preview_fps_cap > 0 else 'Preview FPS cap: default',
                             f'Session: {session_name}',
                         ],
                     ),

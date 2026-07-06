@@ -140,10 +140,13 @@ def main() -> int:
     parser.add_argument("--save-every-seconds", type=float, default=0.0, help="每 N 秒保存一张；0 表示不用时间间隔自动保存")
     parser.add_argument("--auto", action="store_true", help="启动后自动开启间隔保存")
     parser.add_argument("--max-saves", type=int, default=0, help="最多保存多少张，0 表示不限")
+    parser.add_argument("--preview-fps", type=float, default=0.0, help="预览窗口帧率上限；0 表示默认每帧刷新")
     parser.add_argument("--no-preview", action="store_true", help="不显示预览窗口")
     args = parser.parse_args()
     if str(args.preset or "").strip() == cap.DUAL_COLOR_PRESET_NAME:
         parser.error("Dual Color Streams 只用于 305 双 RGB；305 单 RGB 间隔采集请用 Default/High Accuracy 等普通模式。")
+    if float(args.preview_fps) < 0:
+        parser.error("--preview-fps 必须 >= 0")
 
     output_root = Path(args.output_root).expanduser().resolve()
     session_dir = make_session_dir(output_root)
@@ -215,6 +218,8 @@ def main() -> int:
             cv2.resizeWindow(WINDOW_NAME, 1280, 800)
             mouse_state = {"toggle": False}
             cv2.setMouseCallback(WINDOW_NAME, on_mouse, mouse_state)
+        preview_interval = 1.0 / float(args.preview_fps) if float(args.preview_fps) > 0 else 0.0
+        next_preview_at = 0.0
 
         print(f"[{cap.now_str()}] Save dir: {session_dir}")
         print("Keys: SPACE/click=START/STOP interval | S=save one | Q/ESC=quit")
@@ -254,8 +259,11 @@ def main() -> int:
             save_req = False
             key = 255
             if not args.no_preview:
-                preview = draw_overlay(img, saved_count, interval_on, fps_value, int(args.save_every_frames), float(args.save_every_seconds), session_dir)
-                cv2.imshow(WINDOW_NAME, preview)
+                if preview_interval <= 0 or now_perf >= next_preview_at:
+                    preview = draw_overlay(img, saved_count, interval_on, fps_value, int(args.save_every_frames), float(args.save_every_seconds), session_dir)
+                    cv2.imshow(WINDOW_NAME, preview)
+                    if preview_interval > 0:
+                        next_preview_at = now_perf + preview_interval
                 key = cv2.waitKey(1) & 0xFF
                 mouse_toggle = bool(mouse_state.get("toggle", False))
                 mouse_state["toggle"] = False

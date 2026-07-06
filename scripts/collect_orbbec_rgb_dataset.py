@@ -74,6 +74,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--preset", default="Default", help="Device preset to load before starting COLOR stream.")
     parser.add_argument("--formats", nargs="+", default=DEFAULT_COLOR_FORMATS, help="Preferred COLOR formats.")
     parser.add_argument("--png-compression", type=int, default=3, help="PNG compression 0..9.")
+    parser.add_argument("--preview-fps", type=float, default=0.0, help="Preview window FPS cap; 0 keeps the default behavior.")
     parser.add_argument("--start-auto", action="store_true", help="Use auto save mode; press Space/S to start or stop.")
     parser.add_argument("--no-preview", action="store_true", help="Run without preview; useful for non-interactive tests only.")
     return parser.parse_args()
@@ -90,6 +91,8 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--width, --height and --fps must be positive.")
     if float(args.auto_interval) <= 0:
         raise ValueError("--auto-interval must be > 0.")
+    if float(args.preview_fps) < 0:
+        raise ValueError("--preview-fps must be >= 0.")
     if str(args.preset or "").strip() == cap.DUAL_COLOR_PRESET_NAME:
         raise ValueError(
             "Dual Color Streams exposes COLOR_LEFT/COLOR_RIGHT only. "
@@ -338,6 +341,24 @@ class PreviewWindow:
         self.key = 255
         return key
 
+    def poll_key(self) -> int:
+        if self.closed:
+            return ord("q")
+        if self.mode == "opencv":
+            try:
+                return cv2.waitKey(1) & 0xFF
+            except Exception:
+                return 255
+        try:
+            self.root.update_idletasks()
+            self.root.update()
+        except Exception:
+            self.closed = True
+            return ord("q")
+        key = self.key
+        self.key = 255
+        return key
+
     def close(self) -> None:
         if self.mode == "opencv":
             try:
@@ -494,6 +515,8 @@ def main() -> int:
 
         if not args.no_preview:
             preview_window = PreviewWindow(WINDOW_NAME, actual_width, actual_height)
+        preview_interval = 1.0 / float(args.preview_fps) if float(args.preview_fps) > 0 else 0.0
+        next_preview_at = 0.0
 
         auto_mode = bool(args.start_auto)
         auto_running = bool(args.no_preview and args.start_auto)
@@ -535,20 +558,25 @@ def main() -> int:
 
             manual_save = False
             if not args.no_preview:
-                preview = draw_overlay(
-                    image,
-                    args.camera,
-                    args.task,
-                    int(fd.width) if fd else actual_width,
-                    int(fd.height) if fd else actual_height,
-                    actual_fps,
-                    measured_fps,
-                    auto_mode,
-                    auto_running,
-                    float(args.auto_interval),
-                    saved_count,
-                )
-                key = preview_window.show(preview)
+                if preview_interval <= 0 or now_perf >= next_preview_at:
+                    preview = draw_overlay(
+                        image,
+                        args.camera,
+                        args.task,
+                        int(fd.width) if fd else actual_width,
+                        int(fd.height) if fd else actual_height,
+                        actual_fps,
+                        measured_fps,
+                        auto_mode,
+                        auto_running,
+                        float(args.auto_interval),
+                        saved_count,
+                    )
+                    key = preview_window.show(preview)
+                    if preview_interval > 0:
+                        next_preview_at = now_perf + preview_interval
+                else:
+                    key = preview_window.poll_key()
             else:
                 key = 255
 

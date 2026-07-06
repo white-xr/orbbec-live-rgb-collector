@@ -67,6 +67,7 @@ MODE_FIELDS = {
         "width",
         "height",
         "fps",
+        "preview_fps",
         "auto_interval",
         "session",
         "output_root",
@@ -80,6 +81,7 @@ MODE_FIELDS = {
         "width",
         "height",
         "fps",
+        "preview_fps",
         "save_every_seconds",
         "save_every_frames",
         "max_saves",
@@ -92,22 +94,28 @@ MODE_FIELDS = {
         "output_root",
         "tag",
         "device_preset",
+        "preview_fps",
     ],
     "rgbd_335l": [
         "output_root",
         "tag",
         "device_preset",
+        "preview_fps",
     ],
     "dual_rgb_305": [
         "output_root",
         "tag",
         "device_preset",
+        "preview_fps",
     ],
-    "merged_dual": [],
+    "merged_dual": [
+        "preview_fps",
+    ],
     "merged_rgbd": [
         "width",
         "height",
         "fps",
+        "preview_fps",
         "device_preset",
         "sdk_bin",
         "output_root",
@@ -184,6 +192,7 @@ DEFAULTS = {
     "width": "1280",
     "height": "800",
     "fps": "30",
+    "preview_fps": "",
     "auto_interval": "1.0",
     "save_every_seconds": "1.0",
     "save_every_frames": "0",
@@ -223,6 +232,7 @@ class LauncherApp:
             "width": StringVar(value=data.get("width", DEFAULTS["width"])),
             "height": StringVar(value=data.get("height", DEFAULTS["height"])),
             "fps": StringVar(value=data.get("fps", DEFAULTS["fps"])),
+            "preview_fps": StringVar(value=data.get("preview_fps", DEFAULTS["preview_fps"])),
             "auto_interval": StringVar(value=data.get("auto_interval", DEFAULTS["auto_interval"])),
             "save_every_seconds": StringVar(value=data.get("save_every_seconds", DEFAULTS["save_every_seconds"])),
             "save_every_frames": StringVar(value=data.get("save_every_frames", DEFAULTS["save_every_frames"])),
@@ -323,6 +333,7 @@ class LauncherApp:
         self.add_entry_row("width", "宽度")
         self.add_entry_row("height", "高度")
         self.add_entry_row("fps", "FPS")
+        self.add_entry_row("preview_fps", "预览帧率", "留空=脚本默认；只限制预览窗口")
         self.add_entry_row("auto_interval", "自动保存间隔(s)")
         self.add_entry_row("save_every_seconds", "间隔保存秒数")
         self.add_entry_row("save_every_frames", "间隔保存帧数", "0 表示不用帧间隔")
@@ -655,6 +666,11 @@ class LauncherApp:
         if output_root:
             cmd.extend(["--output-root", output_root])
 
+    def add_optional_preview_fps(self, cmd: list[str]) -> None:
+        preview_fps = str(self.vars["preview_fps"].get()).strip()
+        if preview_fps:
+            cmd.extend(["--preview-fps", preview_fps])
+
     def build_command(self) -> list[str]:
         mode = self.current_mode()
         if mode == "rgb_dataset":
@@ -689,6 +705,7 @@ class LauncherApp:
             preset = str(self.vars["device_preset"].get()).strip()
             if preset:
                 cmd.extend(["--preset", preset])
+            self.add_optional_preview_fps(cmd)
             if bool(self.vars["start_auto"].get()):
                 cmd.append("--start-auto")
             if bool(self.vars["no_preview"].get()):
@@ -725,6 +742,7 @@ class LauncherApp:
             preset = str(self.vars["device_preset"].get()).strip()
             if preset:
                 cmd.extend(["--preset", preset])
+            self.add_optional_preview_fps(cmd)
             if bool(self.vars["start_auto"].get()):
                 cmd.append("--auto")
             if bool(self.vars["no_preview"].get()):
@@ -745,6 +763,7 @@ class LauncherApp:
             preset = str(self.vars["device_preset"].get()).strip()
             if preset:
                 cmd.extend(["--preset", preset])
+            self.add_optional_preview_fps(cmd)
             return cmd
 
         if mode in ("rgbd_335l", "dual_rgb_305"):
@@ -763,10 +782,13 @@ class LauncherApp:
             preset = str(self.vars["device_preset"].get()).strip()
             if preset:
                 cmd.extend(["--preset", preset])
+            self.add_optional_preview_fps(cmd)
             return cmd
 
         if mode == "merged_dual":
-            return [sys.executable, str(SCRIPTS["merged_dual"])]
+            cmd = [sys.executable, str(SCRIPTS["merged_dual"])]
+            self.add_optional_preview_fps(cmd)
+            return cmd
 
         if mode == "merged_rgbd":
             cmd = [
@@ -785,8 +807,6 @@ class LauncherApp:
                 "--fps",
                 str(self.vars["fps"].get()).strip(),
                 "--show-depth-preview",
-                "--preview-fps",
-                "15",
                 "--preview-every-n",
                 "1",
                 "--depth-preview-every-n",
@@ -795,6 +815,7 @@ class LauncherApp:
             preset = str(self.vars["device_preset"].get()).strip()
             if preset:
                 cmd.extend(["--preset-305", preset])
+            self.add_optional_preview_fps(cmd)
             self.add_common_capture_args(cmd)
             return cmd
 
@@ -830,6 +851,17 @@ class LauncherApp:
                 return False
             if key in {"save_every_seconds", "save_every_frames", "max_saves", "png_compression"} and number < 0:
                 messagebox.showerror("参数错误", f"{key} 不能小于 0")
+                return False
+
+        preview_fps = str(self.vars["preview_fps"].get()).strip()
+        if "preview_fps" in MODE_FIELDS[mode] and preview_fps:
+            try:
+                preview_fps_number = float(preview_fps)
+            except ValueError:
+                messagebox.showerror("参数错误", f"preview_fps 必须是数字或留空: {preview_fps}")
+                return False
+            if preview_fps_number <= 0:
+                messagebox.showerror("参数错误", "preview_fps 必须大于 0，或留空使用默认值")
                 return False
 
         if "device_index" in MODE_FIELDS[mode] and str(self.vars["device_index"].get()).strip():

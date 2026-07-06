@@ -22,6 +22,10 @@ Keyboard controls in the preview window:
 - `a`: toggle manual/auto mode
 - `q` or `Esc`: quit safely
 
+The launcher provides an optional preview FPS field. Leave it empty to use each
+script's default preview behavior; filling it only caps the preview window
+refresh rate and does not change the camera capture FPS.
+
 Saved images use:
 
 ```text
