@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
 import signal
 import subprocess
 import sys
@@ -28,6 +29,7 @@ SCRIPTS_DIR = ROOT / "scripts"
 CONFIG_DIR = ROOT / "config"
 SETTINGS_FILE = CONFIG_DIR / "orbbec_rgb_dataset_gui_settings.json"
 DEFAULT_305_LEFT_SERIAL = "CV2756100024"
+PREFERRED_SDK_BIN = r"D:\OrbbecSDK_v2.8.7\bin"
 
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
@@ -45,9 +47,10 @@ MODE_LABELS = {
     "rgb_interval_305": "305 单 RGB 间隔采集",
     "rgbd_305": "305 RGB-D 采集",
     "rgbd_335l": "335L RGB-D 采集",
-    "dual_rgb_305": "305 双 RGB 采集",
+    "dual_rgb_305": "305 左右双 RGB（非 RGB-D）",
     "merged_dual": "335L + 305 联合采集（单窗口）",
     "merged_rgbd": "335L + 305 RGB-D 联合采集",
+    "dual_305_rgbd": "双 305 RGB-D D2C 同步采集",
 }
 
 MODE_DESCRIPTIONS = {
@@ -58,6 +61,7 @@ MODE_DESCRIPTIONS = {
     "dual_rgb_305": "使用 config/config_dual_rgb.yaml 切到 Dual Color Streams，保存 305 左右双 RGB。",
     "merged_dual": "推荐日常使用：一个窗口同时预览两台相机，按空格/S/E 控制一起保存。",
     "merged_rgbd": "335L 和 305 同时启动 RGB-D，默认按 1280x800@30 请求 color/depth。",
+    "dual_305_rgbd": "同时启动两台 Gemini 305 RGB-D，D2C 对齐，1280x800@30，同步保存 color/depth_raw/depth_vis。",
 }
 
 MODE_FIELDS = {
@@ -131,12 +135,23 @@ MODE_FIELDS = {
         "sdk_bin",
         "output_root",
     ],
+    "dual_305_rgbd": [
+        "width",
+        "height",
+        "fps",
+        "preview_fps",
+        "sync_delta_ms",
+        "tag",
+        "device_preset",
+        "sdk_bin",
+        "output_root",
+    ],
 }
 
 CAMERA_TASKS = {"335L": "coarse", "305": "precise"}
 KNOWN_CAMERA_SERIALS = {"CV2L36000024", "CP28563000N0", "CP2N1630005C"}
 DUAL_COLOR_PRESET = "Dual Color Streams"
-STANDARD_CONFIG_NAMES = {"config.yaml", "config_305_rgbd.yaml", "config_dual_rgb.yaml"}
+STANDARD_CONFIG_NAMES = {"config.yaml", "config_305_rgbd.yaml", "config_305_rgbd_d2c.yaml", "config_dual_rgb.yaml"}
 
 
 def is_standard_config_path(value: object) -> bool:
@@ -186,6 +201,7 @@ MODE_CAMERA_HINTS = {
     "rgbd_335l": "335L",
     "dual_rgb_305": "305",
     "merged_rgbd": "305",
+    "dual_305_rgbd": "305",
 }
 MODE_DEFAULT_PRESETS = {
     "rgb_dataset": "Default",
@@ -194,6 +210,7 @@ MODE_DEFAULT_PRESETS = {
     "rgbd_335l": "Default",
     "dual_rgb_305": DUAL_COLOR_PRESET,
     "merged_rgbd": "Default",
+    "dual_305_rgbd": "Default",
 }
 
 DEFAULTS = {
@@ -214,7 +231,7 @@ DEFAULTS = {
     "device_preset": "Default",
     "serial": "",
     "device_index": "",
-    "sdk_bin": r"D:\OrbbecSDK_v2\bin",
+    "sdk_bin": PREFERRED_SDK_BIN if Path(PREFERRED_SDK_BIN).exists() else r"D:\OrbbecSDK_v2\bin",
     "output_root": str(ROOT / "captures" / "rgb_dataset"),
     "config_path": str(CONFIG_DIR / "config.yaml"),
     "formats": "BGR RGB MJPG YUYV BGRA RGBA UYVY",
@@ -465,7 +482,21 @@ class LauncherApp:
             for idx in range(count):
                 dev = 0
                 try:
-                    dev = sdk.get_device(dl, idx)
+                    try:
+                        dev = sdk.get_device(dl, idx)
+                    except Exception as ex:
+                        devices.append(
+                            {
+                                "index": str(idx),
+                                "name": "SDK device unavailable",
+                                "sn": "UNKNOWN_SN",
+                                "current_preset": "",
+                                "presets": "",
+                                "preset_names": [],
+                                "preset_error": str(ex),
+                            }
+                        )
+                        continue
                     sn, name = sdk.get_device_info(dev)
                     current_preset = ""
                     presets: list[str] = []
@@ -496,6 +527,45 @@ class LauncherApp:
                 sdk.delete_context(ctx)
         return devices
 
+    def enumerate_windows_orbbec_devices(self) -> list[dict[str, object]]:
+        ps = (
+            "Get-PnpDevice -PresentOnly | "
+            "Where-Object { $_.InstanceId -match 'USB\\\\VID_2BC5&PID_(0804|0840)\\\\' -and $_.Class -eq 'USB' } | "
+            "Select-Object FriendlyName,InstanceId | ConvertTo-Json -Compress"
+        )
+        proc = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+        if proc.returncode != 0 or not proc.stdout.strip():
+            return []
+        raw = json.loads(proc.stdout)
+        rows = raw if isinstance(raw, list) else [raw]
+        devices: list[dict[str, object]] = []
+        for row in rows:
+            instance_id = str(row.get("InstanceId", ""))
+            match = re.search(r"VID_2BC5&PID_([0-9A-Fa-f]{4})\\([^\\]+)$", instance_id)
+            if not match:
+                continue
+            pid = match.group(1).upper()
+            sn = match.group(2)
+            name = "Orbbec Gemini 335L" if pid == "0804" else "Orbbec Gemini 305"
+            devices.append(
+                {
+                    "index": str(len(devices)),
+                    "name": name,
+                    "sn": sn,
+                    "current_preset": "",
+                    "presets": "",
+                    "preset_names": [],
+                    "preset_error": "SDK unavailable; detected by Windows PnP",
+                }
+            )
+        return devices
+
     def format_device_list(self, devices: list[dict[str, object]]) -> str:
         if not devices:
             return "未发现 Orbbec 设备"
@@ -511,6 +581,13 @@ class LauncherApp:
         return "\n".join(lines)
 
     def apply_device_list(self, devices: list[dict[str, object]], text: str) -> None:
+        sdk_unavailable_only = bool(devices) and all(str(d.get("sn", "")) == "UNKNOWN_SN" for d in devices)
+        if (not devices and "ob_device_list_get_device" in text) or sdk_unavailable_only:
+            fallback_devices = self.enumerate_windows_orbbec_devices()
+            if fallback_devices:
+                devices = fallback_devices
+                text = self.format_device_list(devices)
+                text += "\nSDK read failed; showing Windows-connected devices only."
         self.detected_devices = devices
         self.device_list_text.set(text)
         if devices:
@@ -559,8 +636,8 @@ class LauncherApp:
             return False
         if mode == "dual_rgb_305":
             return preset == DUAL_COLOR_PRESET
-        if mode in {"rgb_dataset", "rgb_interval_305", "rgbd_305"}:
-            return preset != DUAL_COLOR_PRESET
+        if preset == DUAL_COLOR_PRESET:
+            return False
         return True
 
     def preset_values_for_current_mode(self) -> list[str]:
@@ -643,6 +720,15 @@ class LauncherApp:
             self.vars["width"].set("1280")
             self.vars["height"].set("800")
             self.vars["fps"].set("30")
+            self.vars["output_root"].set(str(ROOT / "captures"))
+        elif mode == "dual_305_rgbd":
+            self.clear_known_serial()
+            self.vars["width"].set("1280")
+            self.vars["height"].set("800")
+            self.vars["fps"].set("30")
+            sdk_bin = str(self.vars["sdk_bin"].get()).strip()
+            if Path(PREFERRED_SDK_BIN).exists() and sdk_bin in {"", r"D:\OrbbecSDK_v2\bin"}:
+                self.vars["sdk_bin"].set(PREFERRED_SDK_BIN)
             self.vars["output_root"].set(str(ROOT / "captures"))
         self.update_preset_choices(force_default=True)
 
@@ -879,6 +965,39 @@ class LauncherApp:
             self.add_common_capture_args(cmd)
             return cmd
 
+        if mode == "dual_305_rgbd":
+            cmd = [
+                sys.executable,
+                str(SCRIPTS["merged_dual"]),
+                "--capture-mode",
+                "dual-305-rgbd",
+                "--config-305",
+                str(CONFIG_DIR / "config_305_rgbd_d2c.yaml"),
+                "--width",
+                str(self.vars["width"].get()).strip(),
+                "--height",
+                str(self.vars["height"].get()).strip(),
+                "--fps",
+                str(self.vars["fps"].get()).strip(),
+                "--show-depth-preview",
+                "--preview-every-n",
+                "1",
+                "--depth-preview-every-n",
+                "5",
+                "--serial-305-left",
+                DEFAULT_305_LEFT_SERIAL,
+            ]
+            tag = str(self.vars["tag"].get()).strip()
+            if tag:
+                cmd.extend(["--tag", tag])
+            preset = str(self.vars["device_preset"].get()).strip()
+            if preset:
+                cmd.extend(["--preset-305", preset])
+            self.add_optional_preview_fps(cmd)
+            self.add_optional_sync_delta(cmd)
+            self.add_common_capture_args(cmd)
+            return cmd
+
         raise RuntimeError(f"unknown mode: {mode}")
 
     def update_command_preview(self) -> None:
@@ -899,6 +1018,7 @@ class LauncherApp:
             "rgb_interval_305": ["width", "height", "fps", "save_every_seconds", "save_every_frames", "max_saves"],
             "merged_dual": ["width", "height", "fps"],
             "merged_rgbd": ["width", "height", "fps"],
+            "dual_305_rgbd": ["width", "height", "fps"],
         }.get(mode, [])
         for key in numeric_fields:
             value = str(self.vars[key].get()).strip()

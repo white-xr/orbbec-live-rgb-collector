@@ -6,6 +6,7 @@ Single-window dual Orbbec capture.
 One process opens either:
 - Gemini 335L RGB-D + Gemini 305 Dual RGB
 - Gemini 335L RGB-D + Gemini 305 RGB-D
+- Gemini 305 RGB-D + Gemini 305 RGB-D with D2C alignment
 
 Keys:
 - S: start saving both cameras
@@ -34,23 +35,27 @@ CONFIG_DIR = PROJECT_ROOT / "config"
 CONFIG_335L_RGBD = CONFIG_DIR / "config.yaml"
 CONFIG_305_DUAL_RGB = CONFIG_DIR / "config_dual_rgb.yaml"
 CONFIG_305_RGBD = CONFIG_DIR / "config_305_rgbd.yaml"
+CONFIG_305_RGBD_D2C = CONFIG_DIR / "config_305_rgbd_d2c.yaml"
 MODEL_335L = "335L"
 MODEL_305 = "305"
 DEFAULT_305_LEFT_SERIAL = "CV2756100024"
 MODE_RGBD_DUAL_RGB = "rgbd-dual-rgb"
 MODE_RGBD_RGBD = "rgbd-rgbd"
+MODE_DUAL_305_RGBD = "dual-305-rgbd"
 CONTROL_BUTTON_RECT = (24, 724, 220, 790)
 ROLE_FOLDERS = {
     "335L_rgbd": "eye_to_hand_335L",
     "305_dual_rgb": "eye_in_hand_305",
     "305left_dual_rgb": "eye_in_hand_305left",
     "305_rgbd": "eye_in_hand_305",
+    "305left_rgbd": "eye_in_hand_305left",
 }
 ROLE_TITLES = {
     "335L_rgbd": "335L RGB-D",
     "305_dual_rgb": "305 Dual RGB",
     "305left_dual_rgb": "305left Dual RGB",
     "305_rgbd": "305 RGB-D",
+    "305left_rgbd": "305left RGB-D",
 }
 
 # 启动并打开两台相机后，等待多少秒自动开始保存。0 表示手动按 S/空格/按钮。
@@ -67,7 +72,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Single-window dual Orbbec capture.")
     parser.add_argument(
         "--capture-mode",
-        choices=[MODE_RGBD_DUAL_RGB, MODE_RGBD_RGBD],
+        choices=[MODE_RGBD_DUAL_RGB, MODE_RGBD_RGBD, MODE_DUAL_305_RGBD],
         default=MODE_RGBD_DUAL_RGB,
         help="Dual capture mode.",
     )
@@ -76,7 +81,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config-305", default="", help="305 config YAML; default depends on --capture-mode")
     parser.add_argument("--output-root", default="", help="Override capture output root for both cameras")
     parser.add_argument("--tag", default="", help="Optional shared session folder name; duplicate names get _01 suffixes")
-    parser.add_argument("--enable-305-left", action="store_true", help="Open a second Gemini 305 Dual RGB camera as 305left")
+    parser.add_argument("--enable-305-left", action="store_true", help="Open a second Gemini 305 camera as 305left")
     parser.add_argument("--serial-305-left", default=DEFAULT_305_LEFT_SERIAL, help="Serial number reserved for the 305left camera")
     parser.add_argument("--width", type=int, default=0, help="Override color/depth width for both cameras")
     parser.add_argument("--height", type=int, default=0, help="Override color/depth height for both cameras")
@@ -171,6 +176,9 @@ def state_preview_panels(state: dict[str, Any], panel_w: int, panel_h: int) -> t
     color = resize_panel(state.get("color"), panel_w, panel_h, f"{role_title} RGB")
     depth_label = f"{role_title} Depth" if SHOW_DEPTH_PREVIEW else f"{role_title} Depth preview off"
     depth = resize_panel(state.get("depth_vis") if SHOW_DEPTH_PREVIEW else None, panel_w, panel_h, depth_label)
+    if role == "305left_rgbd":
+        color = draw_panel_badge(color, "305left")
+        depth = draw_panel_badge(depth, "305left")
     return color, depth
 
 
@@ -312,7 +320,11 @@ def select_device_for_role(
     for idx in range(count):
         dev = 0
         try:
-            dev = sdk.get_device(dl, idx)
+            try:
+                dev = sdk.get_device(dl, idx)
+            except Exception as ex:
+                print(f"[{cap.now_str()}] WARN {role}: skip Device[{idx}] because SDK could not open it: {ex}")
+                continue
             sn, name = sdk.get_device_info(dev)
             sn_key = normalized_serial(sn)
             print(f"[{cap.now_str()}] Device[{idx}]: {name}, SN: {sn}")
@@ -739,14 +751,20 @@ def main() -> int:
     sync_thread: threading.Thread | None = None
     try:
         mode = str(args.capture_mode)
-        SHOW_DEPTH_PREVIEW = bool(args.show_depth_preview or mode == MODE_RGBD_RGBD)
+        SHOW_DEPTH_PREVIEW = bool(args.show_depth_preview or mode in {MODE_RGBD_RGBD, MODE_DUAL_305_RGBD})
         config_335l = Path(args.config_335l)
         if args.config_305:
             config_305 = Path(args.config_305)
+        elif mode == MODE_DUAL_305_RGBD:
+            config_305 = CONFIG_305_RGBD_D2C
         else:
             config_305 = CONFIG_305_RGBD if mode == MODE_RGBD_RGBD else CONFIG_305_DUAL_RGB
         role_305 = "305_rgbd" if mode == MODE_RGBD_RGBD else "305_dual_rgb"
-        window_name = "Orbbec 335L RGB-D + 305 RGB-D" if mode == MODE_RGBD_RGBD else "Orbbec 335L RGB-D + 305 Dual RGB"
+        if mode == MODE_DUAL_305_RGBD:
+            role_305 = "305_rgbd"
+            window_name = "Orbbec 305 RGB-D + 305left RGB-D (D2C)"
+        else:
+            window_name = "Orbbec 335L RGB-D + 305 RGB-D" if mode == MODE_RGBD_RGBD else "Orbbec 335L RGB-D + 305 Dual RGB"
         if args.enable_305_left and mode == MODE_RGBD_DUAL_RGB:
             window_name += " + 305left"
 
@@ -754,25 +772,53 @@ def main() -> int:
         print(f"[{cap.now_str()}] Capture mode: {mode}")
         ctx = sdk.create_context()
         dl = sdk.query_device_list(ctx)
-        if args.enable_305_left and mode != MODE_RGBD_DUAL_RGB:
-            raise RuntimeError("--enable-305-left is only supported with --capture-mode rgbd-dual-rgb.")
+        if args.enable_305_left and mode not in {MODE_RGBD_DUAL_RGB, MODE_DUAL_305_RGBD}:
+            raise RuntimeError("--enable-305-left is only supported with --capture-mode rgbd-dual-rgb or dual-305-rgbd.")
         left_serial = str(args.serial_305_left or "").strip()
-        reserved_left_serials = {normalized_serial(left_serial)} if args.enable_305_left and left_serial else set()
-        if args.enable_305_left and not left_serial:
-            raise RuntimeError("--enable-305-left requires --serial-305-left.")
-        states.append(setup_camera(sdk, dl, config_335l, MODEL_335L, "335L_rgbd", args, exclude_serials=selected_serials(states)))
-        states.append(
-            setup_camera(
-                sdk,
-                dl,
-                config_305,
-                MODEL_305,
-                role_305,
-                args,
-                exclude_serials=selected_serials(states) | reserved_left_serials,
+        needs_fixed_left = args.enable_305_left or mode == MODE_DUAL_305_RGBD
+        reserved_left_serials = {normalized_serial(left_serial)} if needs_fixed_left and left_serial else set()
+        if needs_fixed_left and not left_serial:
+            raise RuntimeError("--serial-305-left is required for the second Gemini 305.")
+
+        if mode == MODE_DUAL_305_RGBD:
+            states.append(
+                setup_camera(
+                    sdk,
+                    dl,
+                    config_305,
+                    MODEL_305,
+                    role_305,
+                    args,
+                    exclude_serials=selected_serials(states) | reserved_left_serials,
+                )
             )
-        )
-        if args.enable_305_left:
+            print(f"[{cap.now_str()}] 305left is fixed to SN: {left_serial}")
+            states.append(
+                setup_camera(
+                    sdk,
+                    dl,
+                    config_305,
+                    MODEL_305,
+                    "305left_rgbd",
+                    args,
+                    exclude_serials=selected_serials(states),
+                    serial_override=left_serial,
+                )
+            )
+        else:
+            states.append(setup_camera(sdk, dl, config_335l, MODEL_335L, "335L_rgbd", args, exclude_serials=selected_serials(states)))
+            states.append(
+                setup_camera(
+                    sdk,
+                    dl,
+                    config_305,
+                    MODEL_305,
+                    role_305,
+                    args,
+                    exclude_serials=selected_serials(states) | reserved_left_serials,
+                )
+            )
+        if args.enable_305_left and mode == MODE_RGBD_DUAL_RGB:
             print(f"[{cap.now_str()}] 305left is fixed to SN: {left_serial}")
             states.append(
                 setup_camera(
@@ -914,10 +960,6 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
-
-
 
 
 
