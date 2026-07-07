@@ -61,7 +61,7 @@ MODE_DESCRIPTIONS = {
     "dual_rgb_305": "使用 config/config_dual_rgb.yaml 切到 Dual Color Streams，保存 305 左右双 RGB。",
     "merged_dual": "推荐日常使用：一个窗口同时预览两台相机，按空格/S/E 控制一起保存。",
     "merged_rgbd": "335L 和 305 同时启动 RGB-D，默认按 1280x800@30 请求 color/depth。",
-    "dual_305_rgbd": "同时启动两台 Gemini 305 RGB-D，D2C 对齐，1280x800@30，同步保存 color/depth_raw/depth_vis。",
+    "dual_305_rgbd": "同时启动两台 Gemini 305 RGB-D，D2C 对齐，1280x800@30，轻量保存 color/depth_raw。",
 }
 
 MODE_FIELDS = {
@@ -726,6 +726,7 @@ class LauncherApp:
             self.vars["width"].set("1280")
             self.vars["height"].set("800")
             self.vars["fps"].set("30")
+            self.vars["sync_delta_ms"].set("0")
             sdk_bin = str(self.vars["sdk_bin"].get()).strip()
             if Path(PREFERRED_SDK_BIN).exists() and sdk_bin in {"", r"D:\OrbbecSDK_v2\bin"}:
                 self.vars["sdk_bin"].set(PREFERRED_SDK_BIN)
@@ -979,11 +980,8 @@ class LauncherApp:
                 str(self.vars["height"].get()).strip(),
                 "--fps",
                 str(self.vars["fps"].get()).strip(),
-                "--show-depth-preview",
                 "--preview-every-n",
                 "1",
-                "--depth-preview-every-n",
-                "5",
                 "--serial-305-left",
                 DEFAULT_305_LEFT_SERIAL,
             ]

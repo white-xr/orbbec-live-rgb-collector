@@ -1,6 +1,6 @@
 # ============================================================
 # Orbbec Gemini 305 RGB-D D2C capture config
-# Purpose: Gemini 305 color + aligned depth_raw + colorized depth_vis.
+# Purpose: Gemini 305 color + aligned depth_raw. depth_vis is disabled by default.
 # ============================================================
 
 output:
@@ -9,7 +9,7 @@ output:
   depth_raw_format: "png"
   depth_vis_format: "png"
   ir_format: "png"
-  save_depth_vis: true
+  save_depth_vis: false
   png_compression: 0
   jpg_quality: 95
   writer_threads: 1
@@ -70,7 +70,7 @@ preview:
 pipeline:
   frame_timeout_ms: 200
   frame_aggregate_mode: "FULL_FRAME_REQUIRE"
-  align_mode: "ALIGN_D2C_HW_MODE"
+  align_mode: "ALIGN_D2C_SW_MODE"
   fallback_to_sdk_default: false
 
 pointcloud:

@@ -64,7 +64,7 @@ AUTO_START_DELAY_SECONDS = 0.0
 PREVIEW_TARGET_FPS = 15.0
 # 同步保存线程轮询两台相机最新帧的间隔；快相机多出来的帧会被最新帧覆盖。
 SYNC_SAVE_POLL_SECONDS = 0.002
-# 合并窗口中的 depth 伪彩色预览；RGB-D + RGB-D 模式会默认打开。
+# 合并窗口中的 depth 伪彩色预览；双 305 RGB-D 默认关闭以降低采集负载。
 SHOW_DEPTH_PREVIEW = False
 
 
@@ -95,7 +95,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--show-depth-preview",
         action="store_true",
-        help="Force depth pseudo-color panels; RGB-D + RGB-D mode enables them by default",
+        help="Force depth pseudo-color panels; disabled by default for dual-305-rgbd to reduce load",
     )
     return parser.parse_args()
 
@@ -781,7 +781,7 @@ def main() -> int:
     sync_thread: threading.Thread | None = None
     try:
         mode = str(args.capture_mode)
-        SHOW_DEPTH_PREVIEW = bool(args.show_depth_preview or mode in {MODE_RGBD_RGBD, MODE_DUAL_305_RGBD})
+        SHOW_DEPTH_PREVIEW = bool(args.show_depth_preview or mode == MODE_RGBD_RGBD)
         config_335l = Path(args.config_335l)
         if args.config_305:
             config_305 = Path(args.config_305)
@@ -990,7 +990,6 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
 
 
 

@@ -83,14 +83,15 @@ disabled by default in the provided RGB-D configs (`pipeline.align_mode: "DISABL
 Use the GUI mode `双 305 RGB-D D2C 同步采集`, or run:
 
 ```powershell
-python scripts\merged_dual_camera_capture.py --capture-mode dual-305-rgbd --config-305 config\config_305_rgbd_d2c.yaml --width 1280 --height 800 --fps 30 --show-depth-preview
+python scripts\merged_dual_camera_capture.py --capture-mode dual-305-rgbd --config-305 config\config_305_rgbd_d2c.yaml --width 1280 --height 800 --fps 30
 ```
 
-This mode opens two Gemini 305 cameras. Both cameras save RGB, raw depth, and
-colorized depth preview images. Depth is requested as D2C aligned through
-`config\config_305_rgbd_d2c.yaml`, and the synchronized saver writes one sample
-per camera per save cycle, so both camera folders keep the same sample count.
-The fixed `305left` serial is `CV2756100024`.
+This mode opens two Gemini 305 cameras. Both cameras save RGB and raw depth.
+Colorized depth preview images are disabled by default to reduce capture load.
+Depth is requested as D2C aligned through `config\config_305_rgbd_d2c.yaml`, and
+the synchronized saver writes one sample per camera per save cycle, so both
+camera folders keep the same sample count. The fixed `305left` serial is
+`CV2756100024`.
 
 ## 335L RGB-D + 305 Dual RGB Joint Capture
 
