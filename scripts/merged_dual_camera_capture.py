@@ -36,17 +36,20 @@ CONFIG_305_DUAL_RGB = CONFIG_DIR / "config_dual_rgb.yaml"
 CONFIG_305_RGBD = CONFIG_DIR / "config_305_rgbd.yaml"
 MODEL_335L = "335L"
 MODEL_305 = "305"
+DEFAULT_305_LEFT_SERIAL = "CV2756100024"
 MODE_RGBD_DUAL_RGB = "rgbd-dual-rgb"
 MODE_RGBD_RGBD = "rgbd-rgbd"
 CONTROL_BUTTON_RECT = (24, 724, 220, 790)
 ROLE_FOLDERS = {
     "335L_rgbd": "eye_to_hand_335L",
     "305_dual_rgb": "eye_in_hand_305",
+    "305left_dual_rgb": "eye_in_hand_305left",
     "305_rgbd": "eye_in_hand_305",
 }
 ROLE_TITLES = {
     "335L_rgbd": "335L RGB-D",
     "305_dual_rgb": "305 Dual RGB",
+    "305left_dual_rgb": "305left Dual RGB",
     "305_rgbd": "305 RGB-D",
 }
 
@@ -73,6 +76,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config-305", default="", help="305 config YAML; default depends on --capture-mode")
     parser.add_argument("--output-root", default="", help="Override capture output root for both cameras")
     parser.add_argument("--tag", default="", help="Optional shared session folder name; duplicate names get _01 suffixes")
+    parser.add_argument("--enable-305-left", action="store_true", help="Open a second Gemini 305 Dual RGB camera as 305left")
+    parser.add_argument("--serial-305-left", default=DEFAULT_305_LEFT_SERIAL, help="Serial number reserved for the 305left camera")
     parser.add_argument("--width", type=int, default=0, help="Override color/depth width for both cameras")
     parser.add_argument("--height", type=int, default=0, help="Override color/depth height for both cameras")
     parser.add_argument("--fps", type=int, default=0, help="Override color/depth FPS for both cameras")
@@ -140,12 +145,27 @@ def resize_panel(img: np.ndarray | None, width: int, height: int, label: str) ->
     return canvas
 
 
+def draw_panel_badge(img: np.ndarray, text: str) -> np.ndarray:
+    badge_w = max(92, 16 + len(text) * 11)
+    x2 = img.shape[1] - 12
+    x1 = max(12, x2 - badge_w)
+    y1, y2 = 38, 70
+    cv2.rectangle(img, (x1, y1), (x2, y2), (0, 80, 255), -1)
+    cv2.rectangle(img, (x1, y1), (x2, y2), (255, 255, 255), 1)
+    cv2.putText(img, text, (x1 + 8, y1 + 22), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (255, 255, 255), 2, cv2.LINE_AA)
+    return img
+
+
 def state_preview_panels(state: dict[str, Any], panel_w: int, panel_h: int) -> tuple[np.ndarray, np.ndarray]:
     role_title = ROLE_TITLES.get(str(state.get("role", "")), str(state.get("role", "")))
+    role = str(state.get("role", ""))
     streams = state.get("streams", {}) or {}
     if streams.get("color_left", False) and streams.get("color_right", False) and not streams.get("depth", False):
         left = resize_panel(state.get("left"), panel_w, panel_h, f"{role_title} Left RGB")
         right = resize_panel(state.get("right"), panel_w, panel_h, f"{role_title} Right RGB")
+        if role == "305left_dual_rgb":
+            left = draw_panel_badge(left, "305left")
+            right = draw_panel_badge(right, "305left")
         return left, right
 
     color = resize_panel(state.get("color"), panel_w, panel_h, f"{role_title} RGB")
@@ -154,42 +174,36 @@ def state_preview_panels(state: dict[str, Any], panel_w: int, panel_h: int) -> t
     return color, depth
 
 
-def make_merged_preview(state_335: dict[str, Any], state_305: dict[str, Any], capturing: bool) -> np.ndarray:
+def make_merged_preview(states: list[dict[str, Any]], capturing: bool) -> np.ndarray:
     panel_w = 640
-    panel_h = 400
-    p1, p2 = state_preview_panels(state_335, panel_w, panel_h)
-    p3, p4 = state_preview_panels(state_305, panel_w, panel_h)
-    top = np.hstack([p1, p2])
-    bottom = np.hstack([p3, p4])
-    preview = np.vstack([top, bottom])
+    panel_h = 400 if len(states) <= 2 else 300
+    rows = [np.hstack(state_preview_panels(state, panel_w, panel_h)) for state in states]
+    preview = np.vstack(rows) if rows else np.zeros((panel_h, panel_w * 2, 3), dtype=np.uint8)
 
-    sections = [
-        (
-            ROLE_TITLES.get(str(state_335.get("role", "")), "335L"),
-            [
-                f"SN: {state_335.get('sn', '--')}",
-                f"FPS: {state_335.get('fps', 0.0):.1f}",
-                f"Saved: {state_335.get('writer').pair_index if state_335.get('writer') else 0}",
-            ],
-        ),
-        (
-            ROLE_TITLES.get(str(state_305.get("role", "")), "305"),
-            [
-                f"SN: {state_305.get('sn', '--')}",
-                f"FPS: {state_305.get('fps', 0.0):.1f}",
-                f"Saved: {state_305.get('writer').pair_index if state_305.get('writer') else 0}",
-            ],
-        ),
+    sections = []
+    for state in states:
+        writer = state.get("writer")
+        sections.append(
+            (
+                ROLE_TITLES.get(str(state.get("role", "")), str(state.get("role", ""))),
+                [
+                    f"SN: {state.get('sn', '--')}",
+                    f"FPS: {state.get('fps', 0.0):.1f}",
+                    f"Saved: {writer.pair_index if writer else 0}",
+                ],
+            )
+        )
+    sections.append(
         (
             "Capture",
             [
                 f"Status: {'RUNNING' if capturing else 'IDLE'}",
+                f"Cameras: {len(states)}",
                 "Keys: S=start, E=stop, Q=quit",
             ],
-        ),
-    ]
+        )
+    )
     return cap.draw_status_sections(preview, sections)
-
 
 def draw_capture_button(img: np.ndarray, capturing: bool) -> np.ndarray:
     x1, y1, x2, y2 = CONTROL_BUTTON_RECT
@@ -258,6 +272,89 @@ def write_shared_manifest(shared_dir: Path, states: list[dict[str, Any]]) -> Non
     (shared_dir / "session_manifest.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def normalized_serial(value: str) -> str:
+    return str(value or "").strip().lower()
+
+
+def selected_serials(states: list[dict[str, Any]]) -> set[str]:
+    return {normalized_serial(str(state.get("sn", ""))) for state in states if normalized_serial(str(state.get("sn", "")))}
+
+
+def select_device_for_role(
+    sdk: cap.SDK,
+    dl,
+    serial: str,
+    device_index: int | None,
+    model_hint: str,
+    exclude_serials: set[str] | None,
+    role: str,
+):
+    excluded = {normalized_serial(sn) for sn in (exclude_serials or set()) if normalized_serial(sn)}
+    if not excluded:
+        return cap.select_device(sdk, dl, serial, device_index, model_hint)
+
+    count = sdk.device_count(dl)
+    if count < 1:
+        raise RuntimeError("No Orbbec device found.")
+    if device_index is not None and (device_index < 0 or device_index >= count):
+        raise RuntimeError(f"--device-index {device_index} is out of range, found {count} device(s).")
+
+    serial_filter = normalized_serial(serial)
+    if serial_filter in ("auto", "none"):
+        serial_filter = ""
+    model_filter = cap.normalize_device_match_text(model_hint)
+    print(f"[{cap.now_str()}] Found {count} Orbbec device(s).")
+
+    selected_dev = 0
+    selected_sn = ""
+    selected_name = ""
+    selected_by_model = False
+    for idx in range(count):
+        dev = 0
+        try:
+            dev = sdk.get_device(dl, idx)
+            sn, name = sdk.get_device_info(dev)
+            sn_key = normalized_serial(sn)
+            print(f"[{cap.now_str()}] Device[{idx}]: {name}, SN: {sn}")
+            if sn_key in excluded:
+                print(f"[{cap.now_str()}] {role}: skip already-selected SN {sn}")
+                continue
+            if serial_filter == "any":
+                selected = True
+            elif serial_filter:
+                selected = sn_key == serial_filter
+            elif device_index is not None:
+                selected = idx == device_index
+            elif model_filter:
+                selected = model_filter in cap.normalize_device_match_text(name)
+                selected_by_model = selected
+            else:
+                selected = True
+            if selected:
+                selected_dev = dev
+                selected_sn = sn
+                selected_name = name
+                dev = 0
+                break
+        finally:
+            if dev:
+                sdk.delete_device(dev)
+
+    if not selected_dev:
+        if serial_filter and serial_filter != "any":
+            selector = f"SN {serial}"
+        elif device_index is not None:
+            selector = f"index {device_index}"
+        elif model_filter:
+            selector = f"model hint {model_hint}"
+        else:
+            selector = "first available device"
+        excluded_text = ", ".join(sorted(excluded)) or "none"
+        raise RuntimeError(f"No available Orbbec device matched {selector} for {role}; excluded already-selected SN(s): {excluded_text}.")
+    if selected_by_model:
+        print(f"[{cap.now_str()}] {role}: Auto-selected by model hint \"{model_hint}\". SN: {selected_sn}")
+    return selected_dev, selected_sn, selected_name
+
 def setup_camera(
     sdk: cap.SDK,
     dl,
@@ -265,6 +362,8 @@ def setup_camera(
     model_hint: str,
     role: str,
     args: argparse.Namespace,
+    exclude_serials: set[str] | None = None,
+    serial_override: str = "",
 ) -> dict[str, Any]:
     settings = cap.load_capture_config(config_path)
     apply_runtime_overrides(settings, args)
@@ -278,10 +377,18 @@ def setup_camera(
     streams_cfg = settings.get("streams", {}) or {}
     pointcloud_cfg = settings.get("pointcloud", {}) or {}
 
-    serial = str(device_cfg.get("serial", "") or "")
+    serial = str(serial_override or device_cfg.get("serial", "") or "")
     device_index = device_cfg.get("index", None)
     device_index = None if device_index is None else int(device_index)
-    dev, sn, dev_name = cap.select_device(sdk, dl, serial, device_index, str(device_cfg.get("model_hint", model_hint) or ""))
+    dev, sn, dev_name = select_device_for_role(
+        sdk,
+        dl,
+        serial,
+        device_index,
+        str(device_cfg.get("model_hint", model_hint) or ""),
+        exclude_serials,
+        role,
+    )
     print(f"[{cap.now_str()}] {role}: Device {dev_name}, SN: {sn}")
     try:
         print(f"[{cap.now_str()}] {role}: Current preset: {sdk.get_current_preset_name(dev) or 'unknown'}")
@@ -640,13 +747,45 @@ def main() -> int:
             config_305 = CONFIG_305_RGBD if mode == MODE_RGBD_RGBD else CONFIG_305_DUAL_RGB
         role_305 = "305_rgbd" if mode == MODE_RGBD_RGBD else "305_dual_rgb"
         window_name = "Orbbec 335L RGB-D + 305 RGB-D" if mode == MODE_RGBD_RGBD else "Orbbec 335L RGB-D + 305 Dual RGB"
+        if args.enable_305_left and mode == MODE_RGBD_DUAL_RGB:
+            window_name += " + 305left"
 
         print(f"[{cap.now_str()}] Orbbec SDK version: {sdk.get_sdk_version_text()}")
         print(f"[{cap.now_str()}] Capture mode: {mode}")
         ctx = sdk.create_context()
         dl = sdk.query_device_list(ctx)
-        states.append(setup_camera(sdk, dl, config_335l, MODEL_335L, "335L_rgbd", args))
-        states.append(setup_camera(sdk, dl, config_305, MODEL_305, role_305, args))
+        if args.enable_305_left and mode != MODE_RGBD_DUAL_RGB:
+            raise RuntimeError("--enable-305-left is only supported with --capture-mode rgbd-dual-rgb.")
+        left_serial = str(args.serial_305_left or "").strip()
+        reserved_left_serials = {normalized_serial(left_serial)} if args.enable_305_left and left_serial else set()
+        if args.enable_305_left and not left_serial:
+            raise RuntimeError("--enable-305-left requires --serial-305-left.")
+        states.append(setup_camera(sdk, dl, config_335l, MODEL_335L, "335L_rgbd", args, exclude_serials=selected_serials(states)))
+        states.append(
+            setup_camera(
+                sdk,
+                dl,
+                config_305,
+                MODEL_305,
+                role_305,
+                args,
+                exclude_serials=selected_serials(states) | reserved_left_serials,
+            )
+        )
+        if args.enable_305_left:
+            print(f"[{cap.now_str()}] 305left is fixed to SN: {left_serial}")
+            states.append(
+                setup_camera(
+                    sdk,
+                    dl,
+                    config_305,
+                    MODEL_305,
+                    "305left_dual_rgb",
+                    args,
+                    exclude_serials=selected_serials(states),
+                    serial_override=left_serial,
+                )
+            )
         for state in states:
             thread = threading.Thread(target=camera_worker, args=(sdk, state, capture_event, stop_event), daemon=True, name=f"CameraWorker-{state['role']}")
             thread.start()
@@ -660,11 +799,11 @@ def main() -> int:
         sync_thread.start()
 
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-        cv2.resizeWindow(window_name, 1280, 850)
+        cv2.resizeWindow(window_name, 1280, 980 if len(states) > 2 else 850)
         mouse_state = {"toggle": False}
         cv2.setMouseCallback(window_name, on_mouse, mouse_state)
 
-        print("Keys: S=start both | E=stop both | Q/ESC=quit")
+        print("Keys: S=start all | E=stop all | Q/ESC=quit")
         auto_start_at = time.perf_counter() + float(AUTO_START_DELAY_SECONDS) if AUTO_START_DELAY_SECONDS > 0 else None
         auto_started = False
         if auto_start_at is not None:
@@ -676,7 +815,7 @@ def main() -> int:
                 time.sleep(min(0.005, next_preview_at - now_perf))
             next_preview_at = time.perf_counter() + (1.0 / max(1.0, PREVIEW_TARGET_FPS))
 
-            preview = make_merged_preview(states[0], states[1], capturing)
+            preview = make_merged_preview(states, capturing)
             preview = draw_capture_button(preview, capturing)
             cv2.imshow(window_name, preview)
             key = cv2.waitKey(1) & 0xFF

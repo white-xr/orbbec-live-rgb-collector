@@ -27,6 +27,7 @@ ROOT = Path(__file__).resolve().parent
 SCRIPTS_DIR = ROOT / "scripts"
 CONFIG_DIR = ROOT / "config"
 SETTINGS_FILE = CONFIG_DIR / "orbbec_rgb_dataset_gui_settings.json"
+DEFAULT_305_LEFT_SERIAL = "CV2756100024"
 
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
@@ -114,6 +115,7 @@ MODE_FIELDS = {
         "fps",
         "preview_fps",
         "sync_delta_ms",
+        "enable_305left",
         "tag",
         "sdk_bin",
         "output_root",
@@ -219,6 +221,7 @@ DEFAULTS = {
     "png_compression": "3",
     "start_auto": False,
     "no_preview": False,
+    "enable_305left": False,
 }
 
 
@@ -260,6 +263,7 @@ class LauncherApp:
             "png_compression": StringVar(value=data.get("png_compression", DEFAULTS["png_compression"])),
             "start_auto": BooleanVar(value=bool(data.get("start_auto", DEFAULTS["start_auto"]))),
             "no_preview": BooleanVar(value=bool(data.get("no_preview", DEFAULTS["no_preview"]))),
+            "enable_305left": BooleanVar(value=bool(data.get("enable_305left", DEFAULTS["enable_305left"]))),
         }
 
         if self.vars["mode"].get() not in MODE_LABELS:
@@ -368,6 +372,8 @@ class LauncherApp:
         self.add_entry_row("png_compression", "PNG 压缩", "0 最快，9 最小")
         self.add_check_row("start_auto", "自动保存模式")
         self.add_check_row("no_preview", "无预览窗口")
+
+        self.add_check_row("enable_305left", f"启用第二台 305（305left，SN:{DEFAULT_305_LEFT_SERIAL}）")
         self.empty_params_note = ttk.Label(
             self.param_box,
             text="该模式无需额外参数，直接启动即可。",
@@ -832,6 +838,9 @@ class LauncherApp:
             tag = str(self.vars["tag"].get()).strip()
             if tag:
                 cmd.extend(["--tag", tag])
+            if bool(self.vars["enable_305left"].get()):
+                cmd.append("--enable-305-left")
+                cmd.extend(["--serial-305-left", DEFAULT_305_LEFT_SERIAL])
             self.add_optional_preview_fps(cmd)
             self.add_optional_sync_delta(cmd)
             self.add_common_capture_args(cmd)
