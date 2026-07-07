@@ -191,12 +191,15 @@ def make_merged_preview(states: list[dict[str, Any]], capturing: bool) -> np.nda
     sections = []
     for state in states:
         writer = state.get("writer")
+        update_save_fps(state)
         sections.append(
             (
                 ROLE_TITLES.get(str(state.get("role", "")), str(state.get("role", ""))),
                 [
                     f"SN: {state.get('sn', '--')}",
-                    f"FPS: {state.get('fps', 0.0):.1f}",
+                    f"Live FPS: {state.get('fps', 0.0):.1f}",
+                    f"Save FPS: {state.get('save_fps', 0.0):.1f}",
+                    f"Avg Save: {state.get('avg_save_fps', 0.0):.1f}",
                     f"Saved: {writer.pair_index if writer else 0}",
                 ],
             )
@@ -475,6 +478,10 @@ def setup_camera(
         "fps": 0.0,
         "fps_t0": time.perf_counter(),
         "fps_count": 0,
+        "save_fps": 0.0,
+        "avg_save_fps": 0.0,
+        "save_fps_t0": time.perf_counter(),
+        "save_fps_saved_last": 0,
         "color": None,
         "depth_vis": None,
         "left": None,
@@ -499,12 +506,35 @@ def update_fps(state: dict[str, Any]) -> None:
         state["fps_t0"] = now
 
 
+def update_save_fps(state: dict[str, Any]) -> None:
+    writer = state.get("writer")
+    current_saved = int(writer.pair_index if writer else 0)
+    started_perf = getattr(writer, "started_perf", None) if writer else None
+    now = time.perf_counter()
+    if started_perf is not None:
+        elapsed = max(0.0, now - float(started_perf))
+        state["avg_save_fps"] = (current_saved / elapsed) if elapsed > 0 else 0.0
+
+    last_t = float(state.get("save_fps_t0", now) or now)
+    last_saved = int(state.get("save_fps_saved_last", current_saved) or 0)
+    dt = now - last_t
+    if dt >= 1.0:
+        state["save_fps"] = max(0, current_saved - last_saved) / dt
+        state["save_fps_saved_last"] = current_saved
+        state["save_fps_t0"] = now
+
+
 def reset_sync_payloads(states: list[dict[str, Any]]) -> None:
     for state in states:
         with state["sync_lock"]:
             state["latest_payload"] = None
             state["latest_payload_id"] = 0
             state["latest_saved_payload_id"] = 0
+        writer = state.get("writer")
+        state["save_fps"] = 0.0
+        state["avg_save_fps"] = 0.0
+        state["save_fps_t0"] = time.perf_counter()
+        state["save_fps_saved_last"] = int(writer.pair_index if writer else 0)
 
 
 def set_latest_payload(state: dict[str, Any], payload: dict[str, Any]) -> None:
@@ -960,7 +990,6 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
 
 
 
