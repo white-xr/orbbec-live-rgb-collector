@@ -7,6 +7,7 @@ One process opens either:
 - Gemini 335L RGB-D + Gemini 305 Dual RGB
 - Gemini 335L RGB-D + Gemini 305 RGB-D
 - Gemini 305 RGB-D + Gemini 305 RGB-D with D2C alignment
+- Gemini 305 COLOR + Gemini 305 COLOR
 
 Keys:
 - S: start saving both cameras
@@ -36,12 +37,14 @@ CONFIG_335L_RGBD = CONFIG_DIR / "config.yaml"
 CONFIG_305_DUAL_RGB = CONFIG_DIR / "config_dual_rgb.yaml"
 CONFIG_305_RGBD = CONFIG_DIR / "config_305_rgbd.yaml"
 CONFIG_305_RGBD_D2C = CONFIG_DIR / "config_305_rgbd_d2c.yaml"
+CONFIG_305_MONO_RGB = CONFIG_DIR / "config_305_mono_rgb.yaml"
 MODEL_335L = "335L"
 MODEL_305 = "305"
 DEFAULT_305_LEFT_SERIAL = "CV2756100024"
 MODE_RGBD_DUAL_RGB = "rgbd-dual-rgb"
 MODE_RGBD_RGBD = "rgbd-rgbd"
 MODE_DUAL_305_RGBD = "dual-305-rgbd"
+MODE_DUAL_305_COLOR = "dual-305-rgb"
 CONTROL_BUTTON_RECT = (24, 724, 220, 790)
 ROLE_FOLDERS = {
     "335L_rgbd": "eye_to_hand_335L",
@@ -49,6 +52,8 @@ ROLE_FOLDERS = {
     "305left_dual_rgb": "eye_in_hand_305left",
     "305_rgbd": "eye_in_hand_305",
     "305left_rgbd": "eye_in_hand_305left",
+    "305_color": "eye_in_hand_305",
+    "305left_color": "eye_in_hand_305left",
 }
 ROLE_TITLES = {
     "335L_rgbd": "335L RGB-D",
@@ -56,6 +61,8 @@ ROLE_TITLES = {
     "305left_dual_rgb": "305left Dual RGB",
     "305_rgbd": "305 RGB-D",
     "305left_rgbd": "305left RGB-D",
+    "305_color": "305 RGB",
+    "305left_color": "305left RGB",
 }
 
 # 启动并打开两台相机后，等待多少秒自动开始保存。0 表示手动按 S/空格/按钮。
@@ -72,7 +79,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Single-window dual Orbbec capture.")
     parser.add_argument(
         "--capture-mode",
-        choices=[MODE_RGBD_DUAL_RGB, MODE_RGBD_RGBD, MODE_DUAL_305_RGBD],
+        choices=[MODE_RGBD_DUAL_RGB, MODE_RGBD_RGBD, MODE_DUAL_305_RGBD, MODE_DUAL_305_COLOR],
         default=MODE_RGBD_DUAL_RGB,
         help="Dual capture mode.",
     )
@@ -97,6 +104,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--preview-fps", type=float, default=15.0, help="Merged window refresh FPS")
     parser.add_argument("--preview-every-n", type=int, default=1, help="Update RGB preview every N camera frames")
     parser.add_argument("--depth-preview-every-n", type=int, default=5, help="Update depth pseudo-color preview every N camera frames")
+    parser.add_argument("--color-format", default="", help="Override COLOR stream format, for example MJPG/BGR/RGB/YUYV")
+    parser.add_argument("--image-format", default="", help="Override saved COLOR image format: png or bmp")
     parser.add_argument(
         "--show-depth-preview",
         action="store_true",
@@ -110,11 +119,15 @@ def apply_runtime_overrides(settings: dict[str, Any], args: argparse.Namespace) 
     if output_root:
         settings["output_root"] = output_root
         settings.setdefault("output", {})["base_dir"] = output_root
+    image_format = str(getattr(args, "image_format", "") or "").strip().lower().lstrip(".")
+    if image_format:
+        settings.setdefault("output", {})["color_format"] = image_format
 
     width = int(args.width or 0)
     height = int(args.height or 0)
     fps = int(args.fps or 0)
-    if width <= 0 and height <= 0 and fps <= 0:
+    color_format = str(getattr(args, "color_format", "") or "").strip().upper()
+    if width <= 0 and height <= 0 and fps <= 0 and not color_format:
         return
 
     stream_profile = settings.setdefault("stream_profile", {})
@@ -127,6 +140,19 @@ def apply_runtime_overrides(settings: dict[str, Any], args: argparse.Namespace) 
             profile["height"] = height
         if fps > 0 and not (dual_305_rgbd and key == "depth"):
             profile["fps"] = fps
+        if color_format and key in {"color", "dual_color"}:
+            profile["formats"] = [color_format]
+
+    if width > 0 or height > 0 or fps > 0 or color_format:
+        color_cfg = settings.setdefault("color", {})
+        if width > 0:
+            color_cfg["width"] = width
+        if height > 0:
+            color_cfg["height"] = height
+        if fps > 0:
+            color_cfg["fps"] = fps
+        if color_format:
+            color_cfg["format"] = color_format
 
 
 def apply_preset_override(settings: dict[str, Any], preset_name: str) -> None:
@@ -179,10 +205,17 @@ def state_preview_panels(state: dict[str, Any], panel_w: int, panel_h: int) -> t
             right = draw_panel_badge(right, "305left")
         return left, right
 
+    if streams.get("color", False) and not streams.get("depth", False):
+        color = resize_panel(state.get("color"), panel_w, panel_h, f"{role_title} RGB")
+        if role == "305left_color":
+            color = draw_panel_badge(color, "305left")
+        blank = resize_panel(None, panel_w, panel_h, f"{role_title} single RGB")
+        return color, blank
+
     color = resize_panel(state.get("color"), panel_w, panel_h, f"{role_title} RGB")
     depth_label = f"{role_title} Depth" if SHOW_DEPTH_PREVIEW else f"{role_title} Depth preview off"
     depth = resize_panel(state.get("depth_vis") if SHOW_DEPTH_PREVIEW else None, panel_w, panel_h, depth_label)
-    if role == "305left_rgbd":
+    if role in {"305left_rgbd", "305left_color"}:
         color = draw_panel_badge(color, "305left")
         depth = draw_panel_badge(depth, "305left")
     return color, depth
@@ -601,7 +634,60 @@ def make_save_payload(
             }
         return None
 
+    if streams.get("color", False) and not streams.get("depth", False):
+        if color_fd and color_img is not None:
+            return {
+                "kind": "color",
+                "color_fd": color_fd,
+                "color_img": color_img,
+                "sync_ts_us": int(color_fd.sys_ts),
+            }
+        return None
+
     return None
+
+
+def save_color_frame(writer: cap.SessionWriter, color_fd, color_img: np.ndarray) -> None:
+    if not writer.active:
+        return
+    writer._raise_if_write_failed()
+
+    color_out = color_img
+    if writer.src_width is None or writer.src_height is None:
+        writer.src_width = int(color_img.shape[1])
+        writer.src_height = int(color_img.shape[0])
+
+    if writer.target_width > 0 and writer.target_height > 0:
+        src_ratio = float(color_out.shape[1]) / float(max(1, color_out.shape[0]))
+        dst_ratio = float(writer.target_width) / float(max(1, writer.target_height))
+        if abs(src_ratio - dst_ratio) > 1e-3:
+            raise RuntimeError(
+                f"Aspect ratio mismatch: source={color_out.shape[1]}x{color_out.shape[0]}, "
+                f"target={writer.target_width}x{writer.target_height}."
+            )
+        if color_out.shape[1] != writer.target_width or color_out.shape[0] != writer.target_height:
+            color_out = cv2.resize(color_out, (writer.target_width, writer.target_height), interpolation=cv2.INTER_AREA)
+
+    writer.out_height, writer.out_width = color_out.shape[0], color_out.shape[1]
+    pid = writer.pair_index + 1
+    base = f"{pid:06d}.png"
+    rgb_base = f"{pid:06d}.{writer.color_format}"
+    ts_us = int(color_fd.dev_ts)
+    if writer.first_ts_us is None:
+        writer.first_ts_us = ts_us
+    ts = max(0.0, (ts_us - writer.first_ts_us) / 1_000_000.0)
+
+    with writer.enqueue_lock:
+        if not writer.active:
+            return
+        writer.write_queue.put({
+            "pid": pid,
+            "base": base,
+            "rgb_base": rgb_base,
+            "timestamp_s": ts,
+            "rgb": color_out,
+        })
+        writer.pair_index = pid
 
 
 def save_payload(writer: cap.SessionWriter, payload: dict[str, Any]) -> None:
@@ -619,6 +705,12 @@ def save_payload(writer: cap.SessionWriter, payload: dict[str, Any]) -> None:
             payload["color_img"],
             payload["depth_fd"],
             payload["depth_raw"],
+        )
+    elif kind == "color":
+        save_color_frame(
+            writer,
+            payload["color_fd"],
+            payload["color_img"],
         )
     else:
         writer.mark_skip("format", f"unknown payload kind: {kind}")
@@ -793,12 +885,17 @@ def main() -> int:
             config_305 = Path(args.config_305)
         elif mode == MODE_DUAL_305_RGBD:
             config_305 = CONFIG_305_RGBD_D2C
+        elif mode == MODE_DUAL_305_COLOR:
+            config_305 = CONFIG_305_MONO_RGB
         else:
             config_305 = CONFIG_305_RGBD if mode == MODE_RGBD_RGBD else CONFIG_305_DUAL_RGB
         role_305 = "305_rgbd" if mode == MODE_RGBD_RGBD else "305_dual_rgb"
         if mode == MODE_DUAL_305_RGBD:
             role_305 = "305_rgbd"
             window_name = "Orbbec 305 RGB-D + 305left RGB-D (D2C)"
+        elif mode == MODE_DUAL_305_COLOR:
+            role_305 = "305_color"
+            window_name = "Orbbec 305 RGB + 305left RGB"
         else:
             window_name = "Orbbec 335L RGB-D + 305 RGB-D" if mode == MODE_RGBD_RGBD else "Orbbec 335L RGB-D + 305 Dual RGB"
         if args.enable_305_left and mode == MODE_RGBD_DUAL_RGB:
@@ -808,15 +905,16 @@ def main() -> int:
         print(f"[{cap.now_str()}] Capture mode: {mode}")
         ctx = sdk.create_context()
         dl = sdk.query_device_list(ctx)
-        if args.enable_305_left and mode not in {MODE_RGBD_DUAL_RGB, MODE_DUAL_305_RGBD}:
-            raise RuntimeError("--enable-305-left is only supported with --capture-mode rgbd-dual-rgb or dual-305-rgbd.")
+        if args.enable_305_left and mode not in {MODE_RGBD_DUAL_RGB, MODE_DUAL_305_RGBD, MODE_DUAL_305_COLOR}:
+            raise RuntimeError("--enable-305-left is only supported with --capture-mode rgbd-dual-rgb, dual-305-rgbd, or dual-305-rgb.")
         left_serial = str(args.serial_305_left or "").strip()
-        needs_fixed_left = args.enable_305_left or mode == MODE_DUAL_305_RGBD
+        needs_fixed_left = args.enable_305_left or mode in {MODE_DUAL_305_RGBD, MODE_DUAL_305_COLOR}
         reserved_left_serials = {normalized_serial(left_serial)} if needs_fixed_left and left_serial else set()
         if needs_fixed_left and not left_serial:
             raise RuntimeError("--serial-305-left is required for the second Gemini 305.")
 
-        if mode == MODE_DUAL_305_RGBD:
+        if mode in {MODE_DUAL_305_RGBD, MODE_DUAL_305_COLOR}:
+            left_role = "305left_rgbd" if mode == MODE_DUAL_305_RGBD else "305left_color"
             states.append(
                 setup_camera(
                     sdk,
@@ -835,7 +933,7 @@ def main() -> int:
                     dl,
                     config_305,
                     MODEL_305,
-                    "305left_rgbd",
+                    left_role,
                     args,
                     exclude_serials=selected_serials(states),
                     serial_override=left_serial,
@@ -996,6 +1094,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
-

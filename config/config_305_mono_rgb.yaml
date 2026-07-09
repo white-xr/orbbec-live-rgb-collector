@@ -1,0 +1,81 @@
+# ============================================================
+# Orbbec Gemini 305 single COLOR capture config
+# Purpose: two physical Gemini 305 cameras, one RGB stream per camera.
+# ============================================================
+
+output:
+  base_dir: "D:/OrbbecLiveCollector/captures"
+  color_format: "png"
+  depth_raw_format: "png"
+  depth_vis_format: "png"
+  ir_format: "png"
+  save_depth_vis: false
+  png_compression: 0
+  jpg_quality: 95
+  writer_threads: 1
+  write_queue_maxsize: 8192
+
+streams:
+  color: true
+  depth: false
+  color_left: false
+  color_right: false
+  ir_left: false
+  ir_right: false
+  imu: false
+
+device:
+  model_hint: "305"
+  serial: ""
+  index: null
+
+device_preset:
+  enabled: true
+  name: "Default"
+  required: true
+  settle_ms: 800
+
+color:
+  width: 1280
+  height: 800
+  fps: 60
+  format: "MJPG"
+  auto_exposure: false
+  exposure: 75
+  gain: 16
+  auto_white_balance: true
+  white_balance: 4500
+
+preview:
+  enabled: true
+  window_width: 1400
+  window_height: 800
+  panel_width: 700
+  panel_height: 400
+  preview_every_n_frames: 1
+  depth_vis_every_n_frames: 5
+
+pipeline:
+  frame_timeout_ms: 200
+  frame_aggregate_mode: "FULL_FRAME_REQUIRE"
+  align_mode: "DISABLE"
+  fallback_to_sdk_default: false
+
+stream_profile:
+  enabled: true
+  use_fixed_profile_for_305_335l: false
+  fallback_to_sdk_default: false
+  color:
+    width: 1280
+    height: 800
+    fps: 60
+    formats: ["MJPG"]
+
+pointcloud:
+  enabled: false
+  require_aligned_depth_to_color: false
+  preferred_alignment: "none"
+  depth_unit: "mm"
+
+pose_source:
+  mode: "none"

@@ -51,6 +51,7 @@ MODE_LABELS = {
     "merged_dual": "335L + 305 联合采集（单窗口）",
     "merged_rgbd": "335L + 305 RGB-D 联合采集",
     "dual_305_rgbd": "双 305 RGB-D D2C 同步采集",
+    "dual_305_mono_rgb": "双 305 单目 RGB 同步采集",
 }
 
 MODE_DESCRIPTIONS = {
@@ -62,6 +63,7 @@ MODE_DESCRIPTIONS = {
     "merged_dual": "推荐日常使用：一个窗口同时预览两台相机，按空格/S/E 控制一起保存。",
     "merged_rgbd": "335L 和 305 同时启动 RGB-D，默认按 1280x800@30 请求 color/depth。",
     "dual_305_rgbd": "同时启动两台 Gemini 305 RGB-D，D2C 对齐，1280x800@30，轻量保存 color/depth_raw。",
+    "dual_305_mono_rgb": "同时启动两台 Gemini 305 普通 COLOR 流，同步保存单目 RGB 图片。",
 }
 
 MODE_FIELDS = {
@@ -146,12 +148,25 @@ MODE_FIELDS = {
         "sdk_bin",
         "output_root",
     ],
+    "dual_305_mono_rgb": [
+        "width",
+        "height",
+        "mono_rgb_fps",
+        "preview_fps",
+        "sync_delta_ms",
+        "tag",
+        "device_preset",
+        "stream_format",
+        "image_format",
+        "sdk_bin",
+        "output_root",
+    ],
 }
 
 CAMERA_TASKS = {"335L": "coarse", "305": "precise"}
 KNOWN_CAMERA_SERIALS = {"CV2L36000024", "CP28563000N0", "CP2N1630005C"}
 DUAL_COLOR_PRESET = "Dual Color Streams"
-STANDARD_CONFIG_NAMES = {"config.yaml", "config_305_rgbd.yaml", "config_305_rgbd_d2c.yaml", "config_dual_rgb.yaml"}
+STANDARD_CONFIG_NAMES = {"config.yaml", "config_305_rgbd.yaml", "config_305_rgbd_d2c.yaml", "config_305_mono_rgb.yaml", "config_dual_rgb.yaml"}
 
 
 def is_standard_config_path(value: object) -> bool:
@@ -202,6 +217,7 @@ MODE_CAMERA_HINTS = {
     "dual_rgb_305": "305",
     "merged_rgbd": "305",
     "dual_305_rgbd": "305",
+    "dual_305_mono_rgb": "305",
 }
 MODE_DEFAULT_PRESETS = {
     "rgb_dataset": "Default",
@@ -211,6 +227,7 @@ MODE_DEFAULT_PRESETS = {
     "dual_rgb_305": DUAL_COLOR_PRESET,
     "merged_rgbd": "Default",
     "dual_305_rgbd": "Default",
+    "dual_305_mono_rgb": "Default",
 }
 
 DEFAULTS = {
@@ -220,6 +237,7 @@ DEFAULTS = {
     "width": "1280",
     "height": "800",
     "fps": "30",
+    "mono_rgb_fps": "60",
     "preview_fps": "",
     "sync_delta_ms": "50",
     "auto_interval": "1.0",
@@ -235,6 +253,8 @@ DEFAULTS = {
     "output_root": str(ROOT / "captures" / "rgb_dataset"),
     "config_path": str(CONFIG_DIR / "config.yaml"),
     "formats": "BGR RGB MJPG YUYV BGRA RGBA UYVY",
+    "stream_format": "MJPG",
+    "image_format": "png",
     "png_compression": "3",
     "start_auto": False,
     "no_preview": False,
@@ -262,6 +282,7 @@ class LauncherApp:
             "width": StringVar(value=data.get("width", DEFAULTS["width"])),
             "height": StringVar(value=data.get("height", DEFAULTS["height"])),
             "fps": StringVar(value=data.get("fps", DEFAULTS["fps"])),
+            "mono_rgb_fps": StringVar(value=data.get("mono_rgb_fps", DEFAULTS["mono_rgb_fps"])),
             "preview_fps": StringVar(value=data.get("preview_fps", DEFAULTS["preview_fps"])),
             "sync_delta_ms": StringVar(value=data.get("sync_delta_ms", DEFAULTS["sync_delta_ms"])),
             "auto_interval": StringVar(value=data.get("auto_interval", DEFAULTS["auto_interval"])),
@@ -277,6 +298,8 @@ class LauncherApp:
             "output_root": StringVar(value=data.get("output_root", DEFAULTS["output_root"])),
             "config_path": StringVar(value=data.get("config_path", DEFAULTS["config_path"])),
             "formats": StringVar(value=data.get("formats", DEFAULTS["formats"])),
+            "stream_format": StringVar(value=data.get("stream_format", DEFAULTS["stream_format"])),
+            "image_format": StringVar(value=data.get("image_format", DEFAULTS["image_format"])),
             "png_compression": StringVar(value=data.get("png_compression", DEFAULTS["png_compression"])),
             "start_auto": BooleanVar(value=bool(data.get("start_auto", DEFAULTS["start_auto"]))),
             "no_preview": BooleanVar(value=bool(data.get("no_preview", DEFAULTS["no_preview"]))),
@@ -365,6 +388,7 @@ class LauncherApp:
         self.add_entry_row("width", "宽度")
         self.add_entry_row("height", "高度")
         self.add_entry_row("fps", "FPS")
+        self.add_combo_row("mono_rgb_fps", "FPS", ["60", "30"], None, "双 305 单目 RGB 只允许 30 或 60")
         self.add_entry_row("preview_fps", "预览帧率", "留空=脚本默认；只限制预览窗口")
         self.add_entry_row("sync_delta_ms", "同步阈值(ms)", "跨相机时间差；留空=脚本默认")
         self.add_entry_row("auto_interval", "自动保存间隔(s)")
@@ -386,6 +410,8 @@ class LauncherApp:
         self.add_path_row("output_root", "输出目录", browse_dir=True)
         self.add_path_row("config_path", "配置文件", browse_dir=False)
         self.add_entry_row("formats", "COLOR 格式优先级")
+        self.add_combo_row("stream_format", "COLOR 格式", ["MJPG", "YUYV", "RGB", "BGR", "BGRA", "RGBA", "UYVY"], None, "相机取流格式")
+        self.add_combo_row("image_format", "保存格式", ["png", "bmp"], None, "图片落盘格式")
         self.add_entry_row("png_compression", "PNG 压缩", "0 最快，9 最小")
         self.add_check_row("start_auto", "自动保存模式")
         self.add_check_row("no_preview", "无预览窗口")
@@ -731,6 +757,18 @@ class LauncherApp:
             if Path(PREFERRED_SDK_BIN).exists() and sdk_bin in {"", r"D:\OrbbecSDK_v2\bin"}:
                 self.vars["sdk_bin"].set(PREFERRED_SDK_BIN)
             self.vars["output_root"].set(str(ROOT / "captures"))
+        elif mode == "dual_305_mono_rgb":
+            self.clear_known_serial()
+            self.vars["width"].set("1280")
+            self.vars["height"].set("800")
+            self.vars["mono_rgb_fps"].set("60")
+            self.vars["sync_delta_ms"].set("0")
+            self.vars["stream_format"].set("MJPG")
+            self.vars["image_format"].set("png")
+            sdk_bin = str(self.vars["sdk_bin"].get()).strip()
+            if Path(PREFERRED_SDK_BIN).exists() and sdk_bin in {"", r"D:\OrbbecSDK_v2\bin"}:
+                self.vars["sdk_bin"].set(PREFERRED_SDK_BIN)
+            self.vars["output_root"].set(str(ROOT / "captures"))
         self.update_preset_choices(force_default=True)
 
         for row in self.field_rows.values():
@@ -996,6 +1034,40 @@ class LauncherApp:
             self.add_common_capture_args(cmd)
             return cmd
 
+        if mode == "dual_305_mono_rgb":
+            cmd = [
+                sys.executable,
+                str(SCRIPTS["merged_dual"]),
+                "--capture-mode",
+                "dual-305-rgb",
+                "--config-305",
+                str(CONFIG_DIR / "config_305_mono_rgb.yaml"),
+                "--width",
+                str(self.vars["width"].get()).strip(),
+                "--height",
+                str(self.vars["height"].get()).strip(),
+                "--fps",
+                str(self.vars["mono_rgb_fps"].get()).strip(),
+                "--color-format",
+                str(self.vars["stream_format"].get()).strip(),
+                "--image-format",
+                str(self.vars["image_format"].get()).strip(),
+                "--preview-every-n",
+                "1",
+                "--serial-305-left",
+                DEFAULT_305_LEFT_SERIAL,
+            ]
+            tag = str(self.vars["tag"].get()).strip()
+            if tag:
+                cmd.extend(["--tag", tag])
+            preset = str(self.vars["device_preset"].get()).strip()
+            if preset:
+                cmd.extend(["--preset-305", preset])
+            self.add_optional_preview_fps(cmd)
+            self.add_optional_sync_delta(cmd)
+            self.add_common_capture_args(cmd)
+            return cmd
+
         raise RuntimeError(f"unknown mode: {mode}")
 
     def update_command_preview(self) -> None:
@@ -1017,6 +1089,7 @@ class LauncherApp:
             "merged_dual": ["width", "height", "fps"],
             "merged_rgbd": ["width", "height", "fps"],
             "dual_305_rgbd": ["width", "height", "fps"],
+            "dual_305_mono_rgb": ["width", "height", "mono_rgb_fps"],
         }.get(mode, [])
         for key in numeric_fields:
             value = str(self.vars[key].get()).strip()
@@ -1030,6 +1103,20 @@ class LauncherApp:
                 return False
             if key in {"save_every_seconds", "save_every_frames", "max_saves", "png_compression"} and number < 0:
                 messagebox.showerror("参数错误", f"{key} 不能小于 0")
+                return False
+
+        if mode == "dual_305_mono_rgb":
+            mono_rgb_fps = str(self.vars["mono_rgb_fps"].get()).strip()
+            if mono_rgb_fps not in {"30", "60"}:
+                messagebox.showerror("参数错误", "双 305 单目 RGB 的 FPS 只能选择 30 或 60")
+                return False
+            stream_format = str(self.vars["stream_format"].get()).strip().upper()
+            if stream_format not in {"MJPG", "YUYV", "RGB", "BGR", "BGRA", "RGBA", "UYVY"}:
+                messagebox.showerror("参数错误", f"不支持的 COLOR 格式: {stream_format}")
+                return False
+            image_format = str(self.vars["image_format"].get()).strip().lower()
+            if image_format not in {"png", "bmp"}:
+                messagebox.showerror("参数错误", "保存格式目前支持 png 或 bmp")
                 return False
 
         preview_fps = str(self.vars["preview_fps"].get()).strip()
