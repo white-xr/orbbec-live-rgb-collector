@@ -38,8 +38,8 @@ device_preset:
 color:
   width: 1280
   height: 800
-  fps: 30
-  format: "BGR"
+  fps: 60
+  format: "MJPG"
   auto_exposure: false
   exposure: 75
   gain: 16

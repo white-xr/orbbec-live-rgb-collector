@@ -85,7 +85,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--serial-305-left", default=DEFAULT_305_LEFT_SERIAL, help="Serial number reserved for the 305left camera")
     parser.add_argument("--width", type=int, default=0, help="Override color/depth width for both cameras")
     parser.add_argument("--height", type=int, default=0, help="Override color/depth height for both cameras")
-    parser.add_argument("--fps", type=int, default=0, help="Override color/depth FPS for both cameras")
+    parser.add_argument(
+        "--fps",
+        type=int,
+        default=0,
+        help="Override FPS. In dual-305-rgbd mode this overrides COLOR only; DEPTH keeps config FPS.",
+    )
     parser.add_argument("--max-sync-diff-ms", type=float, default=50.0, help="Max cross-camera system timestamp delta for one saved sample; 0 disables this gate")
     parser.add_argument("--preset-335l", default="", help="Override 335L device preset")
     parser.add_argument("--preset-305", default="", help="Override 305 device preset")
@@ -113,13 +118,14 @@ def apply_runtime_overrides(settings: dict[str, Any], args: argparse.Namespace) 
         return
 
     stream_profile = settings.setdefault("stream_profile", {})
+    dual_305_rgbd = str(getattr(args, "capture_mode", "")) == MODE_DUAL_305_RGBD
     for key in ("color", "depth", "dual_color"):
         profile = stream_profile.setdefault(key, {})
         if width > 0:
             profile["width"] = width
         if height > 0:
             profile["height"] = height
-        if fps > 0:
+        if fps > 0 and not (dual_305_rgbd and key == "depth"):
             profile["fps"] = fps
 
 
@@ -990,7 +996,6 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
 
 
 
