@@ -173,6 +173,7 @@ MODE_FIELDS = {
         "preview_scale",
         "writer_threads",
         "write_queue_size",
+        "defer_write_until_stop",
         "usb_backend",
         "stream_format",
         "image_format",
@@ -291,6 +292,7 @@ DEFAULTS = {
     "no_enhance": False,
     "save_enhanced": False,
     "drop_when_full": False,
+    "defer_write_until_stop": True,
     "enable_305left": False,
 }
 
@@ -345,6 +347,7 @@ class LauncherApp:
             "no_enhance": BooleanVar(value=bool(data.get("no_enhance", DEFAULTS["no_enhance"]))),
             "save_enhanced": BooleanVar(value=bool(data.get("save_enhanced", DEFAULTS["save_enhanced"]))),
             "drop_when_full": BooleanVar(value=bool(data.get("drop_when_full", DEFAULTS["drop_when_full"]))),
+            "defer_write_until_stop": BooleanVar(value=bool(data.get("defer_write_until_stop", DEFAULTS["defer_write_until_stop"]))),
             "enable_305left": BooleanVar(value=bool(data.get("enable_305left", DEFAULTS["enable_305left"]))),
         }
 
@@ -437,6 +440,7 @@ class LauncherApp:
         self.add_entry_row("preview_fps", "预览帧率", "留空=脚本默认；只限制预览窗口")
         self.add_entry_row("writer_threads", "写盘线程数", "USB 图片后台写盘线程，PNG 可适当加大")
         self.add_entry_row("write_queue_size", "写盘队列", "队列越大越能缓冲，停止后会等待写完")
+        self.add_check_row("defer_write_until_stop", "停止后再写盘")
         self.add_entry_row("sync_delta_ms", "同步阈值(ms)", "跨相机时间差；留空=脚本默认")
         self.add_entry_row("auto_interval", "自动保存间隔(s)")
         self.add_entry_row("save_every_seconds", "间隔保存秒数")
@@ -830,6 +834,7 @@ class LauncherApp:
             self.vars["preview_scale"].set("0.5")
             self.vars["writer_threads"].set("4")
             self.vars["write_queue_size"].set("256")
+            self.vars["defer_write_until_stop"].set(True)
             self.vars["usb_backend"].set("msmf")
             self.vars["stream_format"].set("MJPG")
             self.vars["image_format"].set("jpg")
@@ -1178,6 +1183,8 @@ class LauncherApp:
                 cmd.append("--no-enhance")
             if bool(self.vars["save_enhanced"].get()):
                 cmd.append("--save-enhanced")
+            if bool(self.vars["defer_write_until_stop"].get()):
+                cmd.append("--defer-write-until-stop")
             if bool(self.vars["drop_when_full"].get()):
                 cmd.append("--drop-when-full")
             return cmd

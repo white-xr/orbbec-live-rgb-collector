@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import csv
 import queue
+import signal
 import threading
 import time
 from datetime import datetime
@@ -25,6 +26,13 @@ BACKENDS = {
     "dshow": cv2.CAP_DSHOW,
     "any": cv2.CAP_ANY,
 }
+
+STOP_REQUESTED = False
+
+
+def request_stop(_signum=None, _frame=None) -> None:
+    global STOP_REQUESTED
+    STOP_REQUESTED = True
 
 
 def sanitize_name(value: str) -> str:
@@ -145,12 +153,14 @@ class AsyncImageWriter:
         self.args = args
         self.queue: queue.Queue | None = queue.Queue(maxsize=max(1, int(args.write_queue_size)))
         self.threads: list[threading.Thread] = []
+        self.deferred_items: list[tuple[str, np.ndarray]] = []
         self.error: Exception | None = None
         self.error_lock = threading.Lock()
-        for idx in range(max(1, int(args.writer_threads))):
-            thread = threading.Thread(target=self._worker, name=f"UsbImageWriter-{idx + 1}", daemon=True)
-            thread.start()
-            self.threads.append(thread)
+        if not args.defer_write_until_stop:
+            for idx in range(max(1, int(args.writer_threads))):
+                thread = threading.Thread(target=self._worker, name=f"UsbImageWriter-{idx + 1}", daemon=True)
+                thread.start()
+                self.threads.append(thread)
 
     def _worker(self) -> None:
         assert self.queue is not None
@@ -175,6 +185,11 @@ class AsyncImageWriter:
 
     def enqueue(self, filename: str, frame: np.ndarray) -> bool:
         self.raise_if_failed()
+        if self.args.defer_write_until_stop:
+            if self.args.drop_when_full and len(self.deferred_items) >= int(self.args.write_queue_size):
+                return False
+            self.deferred_items.append((filename, frame.copy()))
+            return True
         assert self.queue is not None
         item = (filename, frame.copy())
         if self.args.drop_when_full:
@@ -187,6 +202,12 @@ class AsyncImageWriter:
         return True
 
     def close(self) -> None:
+        if self.args.defer_write_until_stop:
+            for filename, frame in self.deferred_items:
+                write_image(self.color_dir / filename, frame, self.args.image_format, self.args.jpg_quality)
+            self.deferred_items.clear()
+            self.raise_if_failed()
+            return
         if self.queue is None:
             return
         self.queue.join()
@@ -198,6 +219,8 @@ class AsyncImageWriter:
         self.queue = None
 
     def pending(self) -> int:
+        if self.args.defer_write_until_stop:
+            return len(self.deferred_items)
         return 0 if self.queue is None else int(self.queue.qsize())
 
 
@@ -210,7 +233,10 @@ def start_session(args: argparse.Namespace) -> tuple[Path, Path, object, csv.wri
     writer.writerow(["frame_id", "timestamp_s", "system_time_s", "filename"])
     image_writer = AsyncImageWriter(color_dir, args)
     print(f"[INFO] session started: {session_dir}")
-    print(f"[INFO] background writer: threads={args.writer_threads}, queue_size={args.write_queue_size}")
+    if args.defer_write_until_stop:
+        print("[INFO] writer mode: defer image encoding/writing until stop")
+    else:
+        print(f"[INFO] background writer: threads={args.writer_threads}, queue_size={args.write_queue_size}")
     return session_dir, color_dir, ts_file, writer, image_writer
 
 
@@ -228,6 +254,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--jpg-quality", type=int, default=95)
     parser.add_argument("--writer-threads", type=int, default=4)
     parser.add_argument("--write-queue-size", type=int, default=256)
+    parser.add_argument("--defer-write-until-stop", action="store_true")
     parser.add_argument("--drop-when-full", action="store_true")
     parser.add_argument("--preview-scale", type=float, default=0.5)
     parser.add_argument("--preview-fps", type=float, default=30.0)
@@ -247,6 +274,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    for sig_name in ("SIGINT", "SIGTERM", "SIGBREAK"):
+        sig = getattr(signal, sig_name, None)
+        if sig is not None:
+            signal.signal(sig, request_stop)
+
     args = parse_args()
     if args.settings and args.backend != "dshow":
         print("[INFO] --settings requires DirectShow; switching backend to dshow.")
@@ -289,7 +321,7 @@ def main() -> int:
         session_dir, color_dir, ts_file, ts_writer, image_writer = start_session(args)
 
     try:
-        while True:
+        while not STOP_REQUESTED:
             ok, frame = cap.read()
             now = time.perf_counter()
             if not ok or frame is None:
