@@ -3,7 +3,7 @@
 """USB RGB camera preview and dataset capture.
 
 This script is for normal UVC cameras, not Orbbec SDK devices.
-Default profile is tuned for DECXIN CAMERA (1bcf:2cd1): 1920x1080@60 MJPG.
+Default profile is tuned for DECXIN CAMERA (1bcf:2cd1): 1920x1080@30 MJPG.
 """
 
 from __future__ import annotations
@@ -245,11 +245,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--index", type=int, default=0)
     parser.add_argument("--width", type=int, default=1920)
     parser.add_argument("--height", type=int, default=1080)
-    parser.add_argument("--fps", type=int, default=60)
+    parser.add_argument("--fps", type=int, default=30)
     parser.add_argument("--backend", choices=sorted(BACKENDS), default="msmf")
     parser.add_argument("--fourcc", default="MJPG")
     parser.add_argument("--allow-profile-fallback", action="store_true", help="Allow capture to continue if the actual camera profile differs from the requested one.")
     parser.add_argument("--profile-check-seconds", type=float, default=2.0, help="Measure startup read FPS for this many seconds when profile fallback is disabled.")
+    parser.add_argument("--strict-read-fps", action="store_true", help="Exit if measured startup read FPS is lower than requested FPS.")
     parser.add_argument("--output-root", default=str(Path("captures") / "usb_rgb"))
     parser.add_argument("--tag", default="")
     parser.add_argument("--image-format", choices=["jpg", "png", "bmp"], default="jpg")
@@ -338,7 +339,7 @@ def main() -> int:
     if not args.allow_profile_fallback:
         startup_fps, startup_shape = measure_startup_read_fps(cap, args.profile_check_seconds)
         print(f"[INFO] startup read check: fps={startup_fps:.1f}, shape={startup_shape}")
-        if startup_fps < float(args.fps) * 0.9:
+        if args.strict_read_fps and startup_fps < float(args.fps) * 0.9:
             cap.release()
             print(
                 "[ERROR] USB camera profile reports the requested FPS, but actual read FPS is too low. "
@@ -346,6 +347,11 @@ def main() -> int:
                 "This is usually a backend/index/driver/bandwidth issue, not image saving."
             )
             return 1
+        if startup_fps < float(args.fps) * 0.9:
+            print(
+                "[WARN] Startup read FPS is lower than requested FPS; capture will continue at the camera/backend's actual speed. "
+                f"Requested {args.fps}fps, measured {startup_fps:.1f}fps."
+            )
     print("Keys: SPACE/S=start/stop saving | P=save one | Q/ESC=quit")
 
     capturing = bool(args.start_auto or args.no_preview)

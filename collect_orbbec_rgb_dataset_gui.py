@@ -66,7 +66,7 @@ MODE_DESCRIPTIONS = {
     "merged_rgbd": "335L 和 305 同时启动 RGB-D，默认按 1280x800@30 请求 color/depth。",
     "dual_305_rgbd": "同时启动两台 Gemini 305 RGB-D，D2C 对齐，1280x800@30，轻量保存 color/depth_raw。",
     "dual_305_mono_rgb": "同时启动两台 Gemini 305 普通 COLOR 流，同步保存单目 RGB 图片。",
-    "usb_rgb": "普通 UVC/USB 摄像头采集，默认 DECXIN CAMERA 1920x1080@60 MJPG。",
+    "usb_rgb": "普通 UVC/USB 摄像头采集，默认 DECXIN CAMERA 1920x1080@30 MJPG。",
 }
 
 MODE_FIELDS = {
@@ -435,7 +435,7 @@ class LauncherApp:
         self.add_entry_row("height", "高度")
         self.add_entry_row("fps", "FPS")
         self.add_combo_row("mono_rgb_fps", "FPS", ["60", "30"], None, "双 305 单目 RGB 只允许 30 或 60")
-        self.add_combo_row("usb_backend", "USB 后端", ["msmf", "dshow", "any"], None, "1080p60 推荐 msmf")
+        self.add_combo_row("usb_backend", "USB 后端", ["msmf", "dshow", "any"], None, "默认 msmf；按设备实际速度采集")
         self.add_entry_row("preview_scale", "预览缩放", "只缩放预览，采集分辨率不变")
         self.add_entry_row("preview_fps", "预览帧率", "留空=脚本默认；只限制预览窗口")
         self.add_entry_row("writer_threads", "写盘线程数", "USB 图片后台写盘线程，PNG 可适当加大")
@@ -829,7 +829,7 @@ class LauncherApp:
             self.vars["usb_index"].set("0")
             self.vars["width"].set("1920")
             self.vars["height"].set("1080")
-            self.vars["fps"].set("60")
+            self.vars["fps"].set("30")
             self.vars["preview_fps"].set("30")
             self.vars["preview_scale"].set("0.5")
             self.vars["writer_threads"].set("4")
