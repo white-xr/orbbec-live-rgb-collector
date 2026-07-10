@@ -248,6 +248,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fps", type=int, default=60)
     parser.add_argument("--backend", choices=sorted(BACKENDS), default="msmf")
     parser.add_argument("--fourcc", default="MJPG")
+    parser.add_argument("--allow-profile-fallback", action="store_true", help="Allow capture to continue if the actual camera profile differs from the requested one.")
     parser.add_argument("--output-root", default=str(Path("captures") / "usb_rgb"))
     parser.add_argument("--tag", default="")
     parser.add_argument("--image-format", choices=["jpg", "png", "bmp"], default="jpg")
@@ -271,6 +272,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--brightness", type=float, default=128)
     parser.add_argument("--contrast", type=float, default=32)
     return parser.parse_args()
+
+
+def profile_matches_request(actual: dict[str, float | int | str], args: argparse.Namespace) -> bool:
+    actual_fps = float(actual["fps"])
+    return (
+        int(actual["width"]) == int(args.width)
+        and int(actual["height"]) == int(args.height)
+        and actual_fps >= max(1.0, float(args.fps) - 2.0)
+    )
 
 
 def main() -> int:
@@ -300,6 +310,15 @@ def main() -> int:
     }
     print(f"[INFO] opened USB camera index={args.index}, backend={args.backend}, requested={args.width}x{args.height}@{args.fps} {args.fourcc}")
     print(f"[INFO] actual={actual}")
+    if not args.allow_profile_fallback and not profile_matches_request(actual, args):
+        cap.release()
+        print(
+            "[ERROR] USB camera did not open the required profile. "
+            f"Required {args.width}x{args.height}@{args.fps}, actual "
+            f"{actual['width']}x{actual['height']}@{actual['fps']:.1f}. "
+            "Try another USB Index/backend, close other camera apps, or use the probe script."
+        )
+        return 1
     print("Keys: SPACE/S=start/stop saving | P=save one | Q/ESC=quit")
 
     capturing = bool(args.start_auto or args.no_preview)
