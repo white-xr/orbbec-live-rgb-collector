@@ -352,10 +352,29 @@ def main() -> int:
             if key in (ord("q"), ord("Q"), 27):
                 break
             if key in (32, ord("s"), ord("S")):
-                capturing = not capturing
-                if capturing and ts_file is None:
-                    session_dir, color_dir, ts_file, ts_writer, image_writer = start_session(args)
-                print(f"[INFO] saving {'started' if capturing else 'stopped'}")
+                if capturing:
+                    capturing = False
+                    print("[INFO] saving stopped")
+                    if image_writer is not None:
+                        print(f"[INFO] waiting for image writer, pending={image_writer.pending()}")
+                        image_writer.close()
+                        image_writer = None
+                    if ts_file is not None:
+                        ts_file.flush()
+                        ts_file.close()
+                        ts_file = None
+                    print(f"[INFO] session finalized: saved={saved}, dropped={dropped}, session={session_dir}")
+                    session_dir = color_dir = None
+                    ts_writer = None
+                    first_t = None
+                    saved = 0
+                    dropped = 0
+                    ts_flush_count = 0
+                else:
+                    capturing = True
+                    if ts_file is None:
+                        session_dir, color_dir, ts_file, ts_writer, image_writer = start_session(args)
+                    print("[INFO] saving started")
             if key in (ord("p"), ord("P")):
                 save_one = True
 
