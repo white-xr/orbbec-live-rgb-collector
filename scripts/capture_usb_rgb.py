@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import csv
+import queue
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -100,6 +102,12 @@ def prepare_preview(frame: np.ndarray, args: argparse.Namespace) -> np.ndarray:
     return shown
 
 
+def prepare_save_frame(frame: np.ndarray, args: argparse.Namespace) -> np.ndarray:
+    if args.save_enhanced:
+        return auto_brightness(frame, float(args.enhance_target))
+    return frame
+
+
 def draw_overlay(frame: np.ndarray, lines: list[str]) -> np.ndarray:
     out = frame.copy()
     width = out.shape[1]
@@ -131,15 +139,79 @@ def write_image(path: Path, frame: np.ndarray, image_format: str, jpg_quality: i
     path.write_bytes(encoded.tobytes())
 
 
-def start_session(args: argparse.Namespace) -> tuple[Path, Path, object, csv.writer]:
+class AsyncImageWriter:
+    def __init__(self, color_dir: Path, args: argparse.Namespace) -> None:
+        self.color_dir = color_dir
+        self.args = args
+        self.queue: queue.Queue | None = queue.Queue(maxsize=max(1, int(args.write_queue_size)))
+        self.threads: list[threading.Thread] = []
+        self.error: Exception | None = None
+        self.error_lock = threading.Lock()
+        for idx in range(max(1, int(args.writer_threads))):
+            thread = threading.Thread(target=self._worker, name=f"UsbImageWriter-{idx + 1}", daemon=True)
+            thread.start()
+            self.threads.append(thread)
+
+    def _worker(self) -> None:
+        assert self.queue is not None
+        while True:
+            item = self.queue.get()
+            try:
+                if item is None:
+                    return
+                filename, frame = item
+                write_image(self.color_dir / filename, frame, self.args.image_format, self.args.jpg_quality)
+            except Exception as ex:
+                with self.error_lock:
+                    if self.error is None:
+                        self.error = ex
+            finally:
+                self.queue.task_done()
+
+    def raise_if_failed(self) -> None:
+        with self.error_lock:
+            if self.error is not None:
+                raise RuntimeError(f"Background image writer failed: {self.error}")
+
+    def enqueue(self, filename: str, frame: np.ndarray) -> bool:
+        self.raise_if_failed()
+        assert self.queue is not None
+        item = (filename, frame.copy())
+        if self.args.drop_when_full:
+            try:
+                self.queue.put_nowait(item)
+                return True
+            except queue.Full:
+                return False
+        self.queue.put(item)
+        return True
+
+    def close(self) -> None:
+        if self.queue is None:
+            return
+        self.queue.join()
+        for _ in self.threads:
+            self.queue.put(None)
+        for thread in self.threads:
+            thread.join(timeout=5.0)
+        self.raise_if_failed()
+        self.queue = None
+
+    def pending(self) -> int:
+        return 0 if self.queue is None else int(self.queue.qsize())
+
+
+def start_session(args: argparse.Namespace) -> tuple[Path, Path, object, csv.writer, AsyncImageWriter]:
     session_dir = unique_session_dir(Path(args.output_root), str(args.tag or ""))
     color_dir = session_dir / "color"
     color_dir.mkdir(parents=True, exist_ok=True)
     ts_file = (session_dir / "timestamps.csv").open("w", encoding="utf-8", newline="")
     writer = csv.writer(ts_file)
     writer.writerow(["frame_id", "timestamp_s", "system_time_s", "filename"])
+    image_writer = AsyncImageWriter(color_dir, args)
     print(f"[INFO] session started: {session_dir}")
-    return session_dir, color_dir, ts_file, writer
+    print(f"[INFO] background writer: threads={args.writer_threads}, queue_size={args.write_queue_size}")
+    return session_dir, color_dir, ts_file, writer, image_writer
 
 
 def parse_args() -> argparse.Namespace:
@@ -154,6 +226,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tag", default="")
     parser.add_argument("--image-format", choices=["jpg", "png", "bmp"], default="jpg")
     parser.add_argument("--jpg-quality", type=int, default=95)
+    parser.add_argument("--writer-threads", type=int, default=4)
+    parser.add_argument("--write-queue-size", type=int, default=256)
+    parser.add_argument("--drop-when-full", action="store_true")
     parser.add_argument("--preview-scale", type=float, default=0.5)
     parser.add_argument("--preview-fps", type=float, default=30.0)
     parser.add_argument("--no-enhance", action="store_true", help="Disable preview brightness lift.")
@@ -199,16 +274,19 @@ def main() -> int:
     session_dir = color_dir = None
     ts_file = None
     ts_writer = None
+    image_writer = None
     first_t = None
     saved = 0
+    dropped = 0
     read_count = 0
     live_fps = 0.0
     fps_t0 = time.perf_counter()
     preview_interval = 1.0 / max(1.0, float(args.preview_fps or 30.0))
     next_preview_t = 0.0
+    ts_flush_count = 0
 
     if capturing:
-        session_dir, color_dir, ts_file, ts_writer = start_session(args)
+        session_dir, color_dir, ts_file, ts_writer, image_writer = start_session(args)
 
     try:
         while True:
@@ -231,7 +309,8 @@ def main() -> int:
                 shown = prepare_preview(frame, args)
                 lines = [
                     f"USB RGB {actual['width']}x{actual['height']}@{actual['fps']:.1f} {args.fourcc}",
-                    f"read fps: {live_fps:.1f} | save: {'ON' if capturing else 'OFF'} | saved: {saved}",
+                    f"read fps: {live_fps:.1f} | save: {'ON' if capturing else 'OFF'} | saved: {saved} | dropped: {dropped}",
+                    f"writer queue: {image_writer.pending() if image_writer else 0}",
                     f"{'enhanced preview' if not args.no_enhance else 'raw preview'} | SPACE/S=start-stop | P=one | Q=quit",
                     frame_stats(frame),
                 ]
@@ -243,33 +322,43 @@ def main() -> int:
             if key in (32, ord("s"), ord("S")):
                 capturing = not capturing
                 if capturing and ts_file is None:
-                    session_dir, color_dir, ts_file, ts_writer = start_session(args)
+                    session_dir, color_dir, ts_file, ts_writer, image_writer = start_session(args)
                 print(f"[INFO] saving {'started' if capturing else 'stopped'}")
             if key in (ord("p"), ord("P")):
                 save_one = True
 
             if capturing or save_one:
                 if ts_file is None:
-                    session_dir, color_dir, ts_file, ts_writer = start_session(args)
+                    session_dir, color_dir, ts_file, ts_writer, image_writer = start_session(args)
                 if first_t is None:
                     first_t = now
-                saved += 1
+                next_id = saved + 1
                 ext = "jpg" if args.image_format == "jpg" else args.image_format
-                filename = f"{saved:06d}.{ext}"
-                out_frame = prepare_preview(frame, args) if args.save_enhanced else frame
-                write_image(color_dir / filename, out_frame, args.image_format, args.jpg_quality)
-                ts_writer.writerow([f"{saved:06d}", f"{now - first_t:.6f}", f"{time.time():.6f}", filename])
-                ts_file.flush()
+                filename = f"{next_id:06d}.{ext}"
+                out_frame = prepare_save_frame(frame, args)
+                if image_writer.enqueue(filename, out_frame):
+                    saved = next_id
+                    ts_writer.writerow([f"{saved:06d}", f"{now - first_t:.6f}", f"{time.time():.6f}", filename])
+                    ts_flush_count += 1
+                    if ts_flush_count >= 30:
+                        ts_file.flush()
+                        ts_flush_count = 0
+                else:
+                    dropped += 1
 
             if args.no_preview and not capturing:
                 break
     finally:
+        if image_writer is not None:
+            print(f"[INFO] waiting for background writer, pending={image_writer.pending()}")
+            image_writer.close()
         if ts_file is not None:
+            ts_file.flush()
             ts_file.close()
         cap.release()
         if not args.no_preview:
             cv2.destroyAllWindows()
-        print(f"[INFO] saved={saved}, session={session_dir if session_dir else '--'}")
+        print(f"[INFO] saved={saved}, dropped={dropped}, session={session_dir if session_dir else '--'}")
     return 0
 
 

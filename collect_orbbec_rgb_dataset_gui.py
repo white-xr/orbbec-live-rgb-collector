@@ -171,6 +171,8 @@ MODE_FIELDS = {
         "fps",
         "preview_fps",
         "preview_scale",
+        "writer_threads",
+        "write_queue_size",
         "usb_backend",
         "stream_format",
         "image_format",
@@ -181,6 +183,7 @@ MODE_FIELDS = {
         "no_preview",
         "no_enhance",
         "save_enhanced",
+        "drop_when_full",
     ],
 }
 
@@ -262,6 +265,8 @@ DEFAULTS = {
     "usb_index": "0",
     "usb_backend": "msmf",
     "preview_scale": "0.5",
+    "writer_threads": "4",
+    "write_queue_size": "256",
     "preview_fps": "",
     "sync_delta_ms": "50",
     "auto_interval": "1.0",
@@ -285,6 +290,7 @@ DEFAULTS = {
     "no_preview": False,
     "no_enhance": False,
     "save_enhanced": False,
+    "drop_when_full": False,
     "enable_305left": False,
 }
 
@@ -313,6 +319,8 @@ class LauncherApp:
             "usb_index": StringVar(value=data.get("usb_index", DEFAULTS["usb_index"])),
             "usb_backend": StringVar(value=data.get("usb_backend", DEFAULTS["usb_backend"])),
             "preview_scale": StringVar(value=data.get("preview_scale", DEFAULTS["preview_scale"])),
+            "writer_threads": StringVar(value=data.get("writer_threads", DEFAULTS["writer_threads"])),
+            "write_queue_size": StringVar(value=data.get("write_queue_size", DEFAULTS["write_queue_size"])),
             "preview_fps": StringVar(value=data.get("preview_fps", DEFAULTS["preview_fps"])),
             "sync_delta_ms": StringVar(value=data.get("sync_delta_ms", DEFAULTS["sync_delta_ms"])),
             "auto_interval": StringVar(value=data.get("auto_interval", DEFAULTS["auto_interval"])),
@@ -336,6 +344,7 @@ class LauncherApp:
             "no_preview": BooleanVar(value=bool(data.get("no_preview", DEFAULTS["no_preview"]))),
             "no_enhance": BooleanVar(value=bool(data.get("no_enhance", DEFAULTS["no_enhance"]))),
             "save_enhanced": BooleanVar(value=bool(data.get("save_enhanced", DEFAULTS["save_enhanced"]))),
+            "drop_when_full": BooleanVar(value=bool(data.get("drop_when_full", DEFAULTS["drop_when_full"]))),
             "enable_305left": BooleanVar(value=bool(data.get("enable_305left", DEFAULTS["enable_305left"]))),
         }
 
@@ -426,6 +435,8 @@ class LauncherApp:
         self.add_combo_row("usb_backend", "USB 后端", ["msmf", "dshow", "any"], None, "1080p60 推荐 msmf")
         self.add_entry_row("preview_scale", "预览缩放", "只缩放预览，采集分辨率不变")
         self.add_entry_row("preview_fps", "预览帧率", "留空=脚本默认；只限制预览窗口")
+        self.add_entry_row("writer_threads", "写盘线程数", "USB 图片后台写盘线程，PNG 可适当加大")
+        self.add_entry_row("write_queue_size", "写盘队列", "队列越大越能缓冲，停止后会等待写完")
         self.add_entry_row("sync_delta_ms", "同步阈值(ms)", "跨相机时间差；留空=脚本默认")
         self.add_entry_row("auto_interval", "自动保存间隔(s)")
         self.add_entry_row("save_every_seconds", "间隔保存秒数")
@@ -454,6 +465,7 @@ class LauncherApp:
         self.add_check_row("no_preview", "无预览窗口")
         self.add_check_row("no_enhance", "关闭预览自动提亮")
         self.add_check_row("save_enhanced", "保存提亮后的画面")
+        self.add_check_row("drop_when_full", "写盘队列满时丢帧")
 
         self.add_check_row("enable_305left", f"启用第二台 305（305left，SN:{DEFAULT_305_LEFT_SERIAL}）")
         self.empty_params_note = ttk.Label(
@@ -816,6 +828,8 @@ class LauncherApp:
             self.vars["fps"].set("60")
             self.vars["preview_fps"].set("30")
             self.vars["preview_scale"].set("0.5")
+            self.vars["writer_threads"].set("4")
+            self.vars["write_queue_size"].set("256")
             self.vars["usb_backend"].set("msmf")
             self.vars["stream_format"].set("MJPG")
             self.vars["image_format"].set("jpg")
@@ -1142,6 +1156,10 @@ class LauncherApp:
                 str(self.vars["jpg_quality"].get()).strip(),
                 "--preview-scale",
                 str(self.vars["preview_scale"].get()).strip(),
+                "--writer-threads",
+                str(self.vars["writer_threads"].get()).strip(),
+                "--write-queue-size",
+                str(self.vars["write_queue_size"].get()).strip(),
             ]
             tag = str(self.vars["tag"].get()).strip()
             output_root = str(self.vars["output_root"].get()).strip()
@@ -1160,6 +1178,8 @@ class LauncherApp:
                 cmd.append("--no-enhance")
             if bool(self.vars["save_enhanced"].get()):
                 cmd.append("--save-enhanced")
+            if bool(self.vars["drop_when_full"].get()):
+                cmd.append("--drop-when-full")
             return cmd
 
         raise RuntimeError(f"unknown mode: {mode}")
@@ -1184,7 +1204,7 @@ class LauncherApp:
             "merged_rgbd": ["width", "height", "fps"],
             "dual_305_rgbd": ["width", "height", "fps"],
             "dual_305_mono_rgb": ["width", "height", "mono_rgb_fps"],
-            "usb_rgb": ["usb_index", "width", "height", "fps", "preview_scale", "jpg_quality"],
+            "usb_rgb": ["usb_index", "width", "height", "fps", "preview_scale", "jpg_quality", "writer_threads", "write_queue_size"],
         }.get(mode, [])
         for key in numeric_fields:
             value = str(self.vars[key].get()).strip()
@@ -1204,6 +1224,9 @@ class LauncherApp:
                 return False
             if key == "jpg_quality" and not (1 <= number <= 100):
                 messagebox.showerror("参数错误", "jpg_quality 必须在 1-100 之间")
+                return False
+            if key in {"writer_threads", "write_queue_size"} and number < 1:
+                messagebox.showerror("参数错误", f"{key} 必须大于等于 1")
                 return False
 
         if mode == "dual_305_mono_rgb":
