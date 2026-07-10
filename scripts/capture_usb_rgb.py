@@ -115,13 +115,20 @@ def draw_overlay(frame: np.ndarray, lines: list[str]) -> np.ndarray:
 def write_image(path: Path, frame: np.ndarray, image_format: str, jpg_quality: int) -> None:
     image_format = image_format.lower().lstrip(".")
     if image_format in {"jpg", "jpeg"}:
-        cv2.imwrite(str(path), frame, [cv2.IMWRITE_JPEG_QUALITY, int(jpg_quality)])
+        ext = ".jpg"
+        params = [cv2.IMWRITE_JPEG_QUALITY, int(jpg_quality)]
     elif image_format == "png":
-        cv2.imwrite(str(path), frame, [cv2.IMWRITE_PNG_COMPRESSION, 1])
+        ext = ".png"
+        params = [cv2.IMWRITE_PNG_COMPRESSION, 1]
     elif image_format == "bmp":
-        cv2.imwrite(str(path), frame)
+        ext = ".bmp"
+        params = []
     else:
         raise ValueError(f"Unsupported image format: {image_format}")
+    ok, encoded = cv2.imencode(ext, frame, params)
+    if not ok:
+        raise RuntimeError(f"Failed to encode image: {path}")
+    path.write_bytes(encoded.tobytes())
 
 
 def start_session(args: argparse.Namespace) -> tuple[Path, Path, object, csv.writer]:
