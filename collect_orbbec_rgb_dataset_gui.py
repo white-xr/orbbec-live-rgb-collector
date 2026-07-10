@@ -40,6 +40,7 @@ SCRIPTS = {
     "rgbd_305": SCRIPTS_DIR / "capture_305_rgbd.py",
     "rgbd_config": SCRIPTS_DIR / "orbbec_live_capture.py",
     "merged_dual": SCRIPTS_DIR / "merged_dual_camera_capture.py",
+    "usb_rgb": SCRIPTS_DIR / "capture_usb_rgb.py",
 }
 
 MODE_LABELS = {
@@ -52,6 +53,7 @@ MODE_LABELS = {
     "merged_rgbd": "335L + 305 RGB-D 联合采集",
     "dual_305_rgbd": "双 305 RGB-D D2C 同步采集",
     "dual_305_mono_rgb": "双 305 单目 RGB 同步采集",
+    "usb_rgb": "USB 摄像头 RGB 采集",
 }
 
 MODE_DESCRIPTIONS = {
@@ -64,6 +66,7 @@ MODE_DESCRIPTIONS = {
     "merged_rgbd": "335L 和 305 同时启动 RGB-D，默认按 1280x800@30 请求 color/depth。",
     "dual_305_rgbd": "同时启动两台 Gemini 305 RGB-D，D2C 对齐，1280x800@30，轻量保存 color/depth_raw。",
     "dual_305_mono_rgb": "同时启动两台 Gemini 305 普通 COLOR 流，同步保存单目 RGB 图片。",
+    "usb_rgb": "普通 UVC/USB 摄像头采集，默认 DECXIN CAMERA 1920x1080@60 MJPG。",
 }
 
 MODE_FIELDS = {
@@ -161,6 +164,24 @@ MODE_FIELDS = {
         "sdk_bin",
         "output_root",
     ],
+    "usb_rgb": [
+        "usb_index",
+        "width",
+        "height",
+        "fps",
+        "preview_fps",
+        "preview_scale",
+        "usb_backend",
+        "stream_format",
+        "image_format",
+        "jpg_quality",
+        "tag",
+        "output_root",
+        "start_auto",
+        "no_preview",
+        "no_enhance",
+        "save_enhanced",
+    ],
 }
 
 CAMERA_TASKS = {"335L": "coarse", "305": "precise"}
@@ -238,6 +259,9 @@ DEFAULTS = {
     "height": "800",
     "fps": "30",
     "mono_rgb_fps": "60",
+    "usb_index": "0",
+    "usb_backend": "msmf",
+    "preview_scale": "0.5",
     "preview_fps": "",
     "sync_delta_ms": "50",
     "auto_interval": "1.0",
@@ -255,9 +279,12 @@ DEFAULTS = {
     "formats": "BGR RGB MJPG YUYV BGRA RGBA UYVY",
     "stream_format": "MJPG",
     "image_format": "png",
+    "jpg_quality": "95",
     "png_compression": "3",
     "start_auto": False,
     "no_preview": False,
+    "no_enhance": False,
+    "save_enhanced": False,
     "enable_305left": False,
 }
 
@@ -283,6 +310,9 @@ class LauncherApp:
             "height": StringVar(value=data.get("height", DEFAULTS["height"])),
             "fps": StringVar(value=data.get("fps", DEFAULTS["fps"])),
             "mono_rgb_fps": StringVar(value=data.get("mono_rgb_fps", DEFAULTS["mono_rgb_fps"])),
+            "usb_index": StringVar(value=data.get("usb_index", DEFAULTS["usb_index"])),
+            "usb_backend": StringVar(value=data.get("usb_backend", DEFAULTS["usb_backend"])),
+            "preview_scale": StringVar(value=data.get("preview_scale", DEFAULTS["preview_scale"])),
             "preview_fps": StringVar(value=data.get("preview_fps", DEFAULTS["preview_fps"])),
             "sync_delta_ms": StringVar(value=data.get("sync_delta_ms", DEFAULTS["sync_delta_ms"])),
             "auto_interval": StringVar(value=data.get("auto_interval", DEFAULTS["auto_interval"])),
@@ -300,9 +330,12 @@ class LauncherApp:
             "formats": StringVar(value=data.get("formats", DEFAULTS["formats"])),
             "stream_format": StringVar(value=data.get("stream_format", DEFAULTS["stream_format"])),
             "image_format": StringVar(value=data.get("image_format", DEFAULTS["image_format"])),
+            "jpg_quality": StringVar(value=data.get("jpg_quality", DEFAULTS["jpg_quality"])),
             "png_compression": StringVar(value=data.get("png_compression", DEFAULTS["png_compression"])),
             "start_auto": BooleanVar(value=bool(data.get("start_auto", DEFAULTS["start_auto"]))),
             "no_preview": BooleanVar(value=bool(data.get("no_preview", DEFAULTS["no_preview"]))),
+            "no_enhance": BooleanVar(value=bool(data.get("no_enhance", DEFAULTS["no_enhance"]))),
+            "save_enhanced": BooleanVar(value=bool(data.get("save_enhanced", DEFAULTS["save_enhanced"]))),
             "enable_305left": BooleanVar(value=bool(data.get("enable_305left", DEFAULTS["enable_305left"]))),
         }
 
@@ -385,10 +418,13 @@ class LauncherApp:
 
         self.add_combo_row("camera", "相机", ["335L", "305"], self.on_camera_changed, "数据集采集模式使用")
         self.add_combo_row("task", "任务", ["coarse", "precise"], None, "335L=coarse，305=precise")
+        self.add_entry_row("usb_index", "USB Index", "普通 USB 摄像头设备号，默认 0")
         self.add_entry_row("width", "宽度")
         self.add_entry_row("height", "高度")
         self.add_entry_row("fps", "FPS")
         self.add_combo_row("mono_rgb_fps", "FPS", ["60", "30"], None, "双 305 单目 RGB 只允许 30 或 60")
+        self.add_combo_row("usb_backend", "USB 后端", ["msmf", "dshow", "any"], None, "1080p60 推荐 msmf")
+        self.add_entry_row("preview_scale", "预览缩放", "只缩放预览，采集分辨率不变")
         self.add_entry_row("preview_fps", "预览帧率", "留空=脚本默认；只限制预览窗口")
         self.add_entry_row("sync_delta_ms", "同步阈值(ms)", "跨相机时间差；留空=脚本默认")
         self.add_entry_row("auto_interval", "自动保存间隔(s)")
@@ -411,10 +447,13 @@ class LauncherApp:
         self.add_path_row("config_path", "配置文件", browse_dir=False)
         self.add_entry_row("formats", "COLOR 格式优先级")
         self.add_combo_row("stream_format", "COLOR 格式", ["MJPG", "YUYV", "RGB", "BGR", "BGRA", "RGBA", "UYVY"], None, "相机取流格式")
-        self.add_combo_row("image_format", "保存格式", ["png", "bmp"], None, "图片落盘格式")
+        self.add_combo_row("image_format", "保存格式", ["jpg", "png", "bmp"], None, "图片落盘格式")
+        self.add_entry_row("jpg_quality", "JPG 质量", "1-100，仅 USB 保存 jpg 时使用")
         self.add_entry_row("png_compression", "PNG 压缩", "0 最快，9 最小")
         self.add_check_row("start_auto", "自动保存模式")
         self.add_check_row("no_preview", "无预览窗口")
+        self.add_check_row("no_enhance", "关闭预览自动提亮")
+        self.add_check_row("save_enhanced", "保存提亮后的画面")
 
         self.add_check_row("enable_305left", f"启用第二台 305（305left，SN:{DEFAULT_305_LEFT_SERIAL}）")
         self.empty_params_note = ttk.Label(
@@ -769,6 +808,19 @@ class LauncherApp:
             if Path(PREFERRED_SDK_BIN).exists() and sdk_bin in {"", r"D:\OrbbecSDK_v2\bin"}:
                 self.vars["sdk_bin"].set(PREFERRED_SDK_BIN)
             self.vars["output_root"].set(str(ROOT / "captures"))
+        elif mode == "usb_rgb":
+            self.clear_known_serial()
+            self.vars["usb_index"].set("0")
+            self.vars["width"].set("1920")
+            self.vars["height"].set("1080")
+            self.vars["fps"].set("60")
+            self.vars["preview_fps"].set("30")
+            self.vars["preview_scale"].set("0.5")
+            self.vars["usb_backend"].set("msmf")
+            self.vars["stream_format"].set("MJPG")
+            self.vars["image_format"].set("jpg")
+            self.vars["jpg_quality"].set("95")
+            self.vars["output_root"].set(str(ROOT / "captures" / "usb_rgb"))
         self.update_preset_choices(force_default=True)
 
         for row in self.field_rows.values():
@@ -1068,6 +1120,48 @@ class LauncherApp:
             self.add_common_capture_args(cmd)
             return cmd
 
+        if mode == "usb_rgb":
+            cmd = [
+                sys.executable,
+                str(SCRIPTS["usb_rgb"]),
+                "--index",
+                str(self.vars["usb_index"].get()).strip(),
+                "--width",
+                str(self.vars["width"].get()).strip(),
+                "--height",
+                str(self.vars["height"].get()).strip(),
+                "--fps",
+                str(self.vars["fps"].get()).strip(),
+                "--backend",
+                str(self.vars["usb_backend"].get()).strip(),
+                "--fourcc",
+                str(self.vars["stream_format"].get()).strip(),
+                "--image-format",
+                str(self.vars["image_format"].get()).strip(),
+                "--jpg-quality",
+                str(self.vars["jpg_quality"].get()).strip(),
+                "--preview-scale",
+                str(self.vars["preview_scale"].get()).strip(),
+            ]
+            tag = str(self.vars["tag"].get()).strip()
+            output_root = str(self.vars["output_root"].get()).strip()
+            preview_fps = str(self.vars["preview_fps"].get()).strip()
+            if tag:
+                cmd.extend(["--tag", tag])
+            if output_root:
+                cmd.extend(["--output-root", output_root])
+            if preview_fps:
+                cmd.extend(["--preview-fps", preview_fps])
+            if bool(self.vars["start_auto"].get()):
+                cmd.append("--start-auto")
+            if bool(self.vars["no_preview"].get()):
+                cmd.append("--no-preview")
+            if bool(self.vars["no_enhance"].get()):
+                cmd.append("--no-enhance")
+            if bool(self.vars["save_enhanced"].get()):
+                cmd.append("--save-enhanced")
+            return cmd
+
         raise RuntimeError(f"unknown mode: {mode}")
 
     def update_command_preview(self) -> None:
@@ -1090,6 +1184,7 @@ class LauncherApp:
             "merged_rgbd": ["width", "height", "fps"],
             "dual_305_rgbd": ["width", "height", "fps"],
             "dual_305_mono_rgb": ["width", "height", "mono_rgb_fps"],
+            "usb_rgb": ["usb_index", "width", "height", "fps", "preview_scale", "jpg_quality"],
         }.get(mode, [])
         for key in numeric_fields:
             value = str(self.vars[key].get()).strip()
@@ -1098,11 +1193,17 @@ class LauncherApp:
             except ValueError:
                 messagebox.showerror("参数错误", f"{key} 必须是数字: {value}")
                 return False
-            if key in {"width", "height", "fps", "auto_interval"} and number <= 0:
+            if key in {"width", "height", "fps", "auto_interval", "preview_scale"} and number <= 0:
                 messagebox.showerror("参数错误", f"{key} 必须大于 0")
                 return False
             if key in {"save_every_seconds", "save_every_frames", "max_saves", "png_compression"} and number < 0:
                 messagebox.showerror("参数错误", f"{key} 不能小于 0")
+                return False
+            if key == "usb_index" and number < 0:
+                messagebox.showerror("参数错误", "usb_index 不能小于 0")
+                return False
+            if key == "jpg_quality" and not (1 <= number <= 100):
+                messagebox.showerror("参数错误", "jpg_quality 必须在 1-100 之间")
                 return False
 
         if mode == "dual_305_mono_rgb":
@@ -1117,6 +1218,19 @@ class LauncherApp:
             image_format = str(self.vars["image_format"].get()).strip().lower()
             if image_format not in {"png", "bmp"}:
                 messagebox.showerror("参数错误", "保存格式目前支持 png 或 bmp")
+                return False
+        if mode == "usb_rgb":
+            backend = str(self.vars["usb_backend"].get()).strip().lower()
+            if backend not in {"msmf", "dshow", "any"}:
+                messagebox.showerror("参数错误", f"不支持的 USB 后端: {backend}")
+                return False
+            stream_format = str(self.vars["stream_format"].get()).strip().upper()
+            if stream_format not in {"MJPG", "YUYV", "YUY2", "RGB", "BGR", "BGRA", "RGBA", "UYVY"}:
+                messagebox.showerror("参数错误", f"不支持的 USB COLOR 格式: {stream_format}")
+                return False
+            image_format = str(self.vars["image_format"].get()).strip().lower()
+            if image_format not in {"jpg", "png", "bmp"}:
+                messagebox.showerror("参数错误", "USB 保存格式支持 jpg、png 或 bmp")
                 return False
 
         preview_fps = str(self.vars["preview_fps"].get()).strip()
