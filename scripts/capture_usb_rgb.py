@@ -249,6 +249,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--backend", choices=sorted(BACKENDS), default="msmf")
     parser.add_argument("--fourcc", default="MJPG")
     parser.add_argument("--allow-profile-fallback", action="store_true", help="Allow capture to continue if the actual camera profile differs from the requested one.")
+    parser.add_argument("--profile-check-seconds", type=float, default=2.0, help="Measure startup read FPS for this many seconds when profile fallback is disabled.")
     parser.add_argument("--output-root", default=str(Path("captures") / "usb_rgb"))
     parser.add_argument("--tag", default="")
     parser.add_argument("--image-format", choices=["jpg", "png", "bmp"], default="jpg")
@@ -281,6 +282,21 @@ def profile_matches_request(actual: dict[str, float | int | str], args: argparse
         and int(actual["height"]) == int(args.height)
         and actual_fps >= max(1.0, float(args.fps) - 2.0)
     )
+
+
+def measure_startup_read_fps(cap: cv2.VideoCapture, seconds: float) -> tuple[float, tuple[int, ...] | None]:
+    end_t = time.perf_counter() + max(0.2, float(seconds))
+    frames = 0
+    shape = None
+    while time.perf_counter() < end_t:
+        ok, frame = cap.read()
+        if ok and frame is not None:
+            frames += 1
+            shape = tuple(frame.shape)
+        else:
+            time.sleep(0.005)
+    elapsed = max(0.000001, float(seconds))
+    return frames / elapsed, shape
 
 
 def main() -> int:
@@ -319,6 +335,17 @@ def main() -> int:
             "Try another USB Index/backend, close other camera apps, or use the probe script."
         )
         return 1
+    if not args.allow_profile_fallback:
+        startup_fps, startup_shape = measure_startup_read_fps(cap, args.profile_check_seconds)
+        print(f"[INFO] startup read check: fps={startup_fps:.1f}, shape={startup_shape}")
+        if startup_fps < float(args.fps) * 0.9:
+            cap.release()
+            print(
+                "[ERROR] USB camera profile reports the requested FPS, but actual read FPS is too low. "
+                f"Required about {args.fps}fps, measured {startup_fps:.1f}fps. "
+                "This is usually a backend/index/driver/bandwidth issue, not image saving."
+            )
+            return 1
     print("Keys: SPACE/S=start/stop saving | P=save one | Q/ESC=quit")
 
     capturing = bool(args.start_auto or args.no_preview)
