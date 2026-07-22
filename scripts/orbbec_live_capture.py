@@ -2256,6 +2256,118 @@ class SessionWriter:
             return json.dumps(data, ensure_ascii=False, indent=2) + '\n'
         return yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
 
+    def _build_dual_rgb_intrinsics_json(self) -> dict[str, Any]:
+        if not (self.save_color_left and self.save_color_right):
+            return {}
+
+        cp = self.camera_params or {}
+        resolved = cp.get('resolved_capture_config', {}) or {}
+        stereo_calib = self._build_stereo_calibration_json()
+        calib = cp.get('stereo_calibration', {}) or {}
+        left = calib.get('left_intrinsic', {}) or cp.get('color_intrinsic', {}) or {}
+        right = calib.get('right_intrinsic', {}) or left
+        left_dist = calib.get('left_distortion', {}) or cp.get('color_distortion', {}) or {}
+        right_dist = calib.get('right_distortion', {}) or left_dist
+
+        def matrix_from_intrinsic(intrinsic: dict[str, Any]) -> list[list[float]]:
+            return [
+                [float(intrinsic.get('fx', 0.0)), 0.0, float(intrinsic.get('cx', 0.0))],
+                [0.0, float(intrinsic.get('fy', 0.0)), float(intrinsic.get('cy', 0.0))],
+                [0.0, 0.0, 1.0],
+            ]
+
+        def distortion_payload(dist: dict[str, Any]) -> dict[str, Any]:
+            return {
+                'model': int(dist.get('model', 0) or 0),
+                'opencv_k1_k2_p1_p2_k3': [
+                    float(dist.get('k1', 0.0)),
+                    float(dist.get('k2', 0.0)),
+                    float(dist.get('p1', 0.0)),
+                    float(dist.get('p2', 0.0)),
+                    float(dist.get('k3', 0.0)),
+                ],
+                'full_k1_k2_k3_k4_k5_k6_p1_p2': {
+                    'k1': float(dist.get('k1', 0.0)),
+                    'k2': float(dist.get('k2', 0.0)),
+                    'k3': float(dist.get('k3', 0.0)),
+                    'k4': float(dist.get('k4', 0.0)),
+                    'k5': float(dist.get('k5', 0.0)),
+                    'k6': float(dist.get('k6', 0.0)),
+                    'p1': float(dist.get('p1', 0.0)),
+                    'p2': float(dist.get('p2', 0.0)),
+                },
+            }
+
+        return {
+            'schema': 'orbbec_305_dual_rgb_intrinsics_v1',
+            'created_at': self.started_at or '',
+            'updated_at': now_str(),
+            'device_name': cp.get('device_name', ''),
+            'device_code': self.sn,
+            'serial_number': self.sn,
+            'camera_role': self.role,
+            'session_tag': self.tag,
+            'capture_config_path': cp.get('capture_config_path', ''),
+            'device_preset': (cp.get('device_preset_report') or {}).get('target_preset', ''),
+            'mode': '305 Dual Color Streams',
+            'left_source_frame': 'OB_FRAME_COLOR_LEFT',
+            'right_source_frame': 'OB_FRAME_COLOR_RIGHT',
+            'left_directory': 'left_rgb',
+            'right_directory': 'right_rgb',
+            'total_frames': self.pair_index,
+            'image_width': int(stereo_calib.get('image_width', left.get('width', 0) or 0)),
+            'image_height': int(stereo_calib.get('image_height', left.get('height', 0) or 0)),
+            'rectified': bool(stereo_calib.get('rectified', False)),
+            'calibration_quality': stereo_calib.get('calibration_quality', 'sdk_or_reference'),
+            'baseline_m': float(stereo_calib.get('baseline_m', 0.0) or 0.0),
+            'left': {
+                'intrinsic': {
+                    'width': int(left.get('width', 0) or 0),
+                    'height': int(left.get('height', 0) or 0),
+                    'fx': float(left.get('fx', 0.0)),
+                    'fy': float(left.get('fy', 0.0)),
+                    'cx': float(left.get('cx', 0.0)),
+                    'cy': float(left.get('cy', 0.0)),
+                },
+                'K': matrix_from_intrinsic(left),
+                'distortion': distortion_payload(left_dist),
+            },
+            'right': {
+                'intrinsic': {
+                    'width': int(right.get('width', 0) or 0),
+                    'height': int(right.get('height', 0) or 0),
+                    'fx': float(right.get('fx', 0.0)),
+                    'fy': float(right.get('fy', 0.0)),
+                    'cx': float(right.get('cx', 0.0)),
+                    'cy': float(right.get('cy', 0.0)),
+                },
+                'K': matrix_from_intrinsic(right),
+                'distortion': distortion_payload(right_dist),
+            },
+            'left_to_right': {
+                'R': stereo_calib.get('R_left_right', []),
+                'T_m': stereo_calib.get('T_left_right_m', []),
+            },
+            'source': {
+                'camera_params_file': 'camera_params.json',
+                'stereo_calib_file': 'stereo_calib.json',
+                'intrinsics_fallback_report': cp.get('intrinsics_fallback_report', {}),
+                'streams': resolved.get('streams', {}),
+                'profiles': resolved.get('stream_profile', {}),
+            },
+        }
+
+    def _write_dual_rgb_intrinsics_json(self) -> None:
+        if self.session_dir is None:
+            return
+        data = self._build_dual_rgb_intrinsics_json()
+        if not data:
+            return
+        (self.session_dir / 'dual_rgb_intrinsics.json').write_text(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            encoding='utf-8',
+        )
+
     def _build_identity_poses_csv(self) -> str:
         lines = [
             'frame_id,m00,m01,m02,m03,m10,m11,m12,m13,m20,m21,m22,m23,m30,m31,m32,m33'
@@ -2331,6 +2443,7 @@ class SessionWriter:
         self.out_height = None
         self.src_width = None
         self.src_height = None
+        self._write_dual_rgb_intrinsics_json()
         self.write_error = None
         self.write_queue = queue.Queue(maxsize=self.write_queue_maxsize)
         self.writer_threads = []
@@ -2550,6 +2663,7 @@ class SessionWriter:
                 flat = [float(v) for row in k for v in row]
                 k_text = ' '.join(f'{v:.8f}' for v in flat) + '\n' + f'{baseline_m:.9f}\n'
                 (self.session_dir / 'K.txt').write_text(k_text, encoding='utf-8')
+            self._write_dual_rgb_intrinsics_json()
 
         if not self.minimal_dual_rgb_layout:
             (self.session_dir / 'camera_info.yaml').write_text(self._build_camera_info_yaml(), encoding='utf-8')
